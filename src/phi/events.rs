@@ -12,6 +12,8 @@ macro_rules! struct_events {
 			// None        => Nothing happening _now_
 			$( pub $k_alias: Option<bool> , )*
 			$( pub $o_alias : bool , )*
+
+			resize: Option<(u32, u32)>
 		}
 
 		impl ImmediateEvents {
@@ -21,6 +23,8 @@ macro_rules! struct_events {
 					// set to None
 					$( $k_alias: None , )*
 					$( $o_alias: false , )*
+
+					resize: None
 				}
 			}
 		}
@@ -33,7 +37,7 @@ macro_rules! struct_events {
 
 			// true  => pressed
 			// false => not pressed
-			$( $k_alias: bool ),*
+			$( pub $k_alias: bool ),*
 		}
 
 		impl Events {
@@ -49,7 +53,7 @@ macro_rules! struct_events {
 			}
 
 			/// Update the events record.
-			pub fn pump(&mut self) {
+			pub fn pump(&mut self, renderer: &mut ::sdl2::render::Renderer) {
 				self.now = ImmediateEvents::new();
 
 				for event in self.pump.poll_iter() {
@@ -57,6 +61,9 @@ macro_rules! struct_events {
 					use sdl2::keyboard::Keycode::*;
 
 					match event {
+						Window { win_event_id: ::sdl2::event::WindowEventId::Resized, .. } => {
+							self.now.resize = Some(renderer.output_size().unwrap());
+						},
 						KeyDown { keycode, .. } => match keycode {
 							// $( ... ),* containing $k_sdl and $k_alias means:
 							//   "for every element ($k_alias : $k_sdl) pair,
@@ -72,7 +79,7 @@ macro_rules! struct_events {
 									}
 									self.$k_alias = true;
 								}
-							),* // and add a comma after every option
+								),* // and add a comma after every option
 							_ => {}
 						},
 
@@ -83,7 +90,7 @@ macro_rules! struct_events {
 									self.now.$k_alias = Some(false);
 									self.$k_alias = false;
 								}
-							),*
+								),*
 							_ => {}
 						},
 
@@ -91,12 +98,12 @@ macro_rules! struct_events {
 							$o_sdl => {
 								self.now.$o_alias = true;
 							}
-						),*
+							),*
 
 						_ => {
 							$(
 								self.now.$o_alias = false;
-							),*
+								),*
 						}
 					}
 				}
