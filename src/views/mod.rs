@@ -1,5 +1,6 @@
 use phi::{Phi, View, ViewAction};
 use phi::data::Rectangle;
+use phi::gfx::Sprite;
 
 use sdl2::pixels::Color;
 
@@ -7,29 +8,69 @@ use sdl2::pixels::Color;
 // Constants
 const PLAYER_SPEED: f64 = 180.0;
 
-// Data types
-struct Ship {
-    rect: Rectangle,
+const SHIP_W: f64 = 64.0;
+const SHIP_H: f64 = 64.0;
+
+/// The different states our ship might be in. In the image, they're ordered
+/// from left to right, then from top to bottom.
+#[derive(Clone, Copy)]
+enum ShipFrame {
+    UpNorm   = 1,
+    UpFast   = 2,
+    UpSlow   = 0,
+    MidNorm  = 4,
+    MidFast  = 5,
+    MidSlow  = 3,
+    DownNorm = 7,
+    DownFast = 8,
+    DownSlow = 6
 }
 
 
+// Data types
+struct Ship {
+    rect: Rectangle,
+    sprites: Vec<Sprite>,
+    current: ShipFrame,
+}
 
-// View definition
 pub struct ShipView {
     player: Ship,
 }
 
 impl ShipView {
     pub fn new (phi: &mut Phi) -> ShipView {
+        let spritesheet = Sprite::load(&mut phi.renderer, "assets/spaceship2.png").unwrap();
+
+        //? When we know in advance how many elements the `Vec` we contain, we
+        //? can allocate the good amount of data up-front.
+        let mut sprites = Vec::with_capacity(9);
+
+        let (w, h) = spritesheet.size();
+        let w = w / 3.0;
+        let h = h / 3.0;
+
+        for y in 0..3 {
+            for x in 0..3 {
+                sprites.push(spritesheet.region(Rectangle {
+                    w: w,
+                    h: h,
+                    x: w * x as f64,
+                    y: h * y as f64,
+                }).unwrap());
+            }
+        }      
         ShipView {
             player: Ship {
                 rect: Rectangle {
                     x: 64.0,
                     y: 64.0,
-                    w: 32.0,
-                    h: 32.0,
-                }
-            }
+                    w: SHIP_W,
+                    h: SHIP_H,
+                },
+                sprites: sprites,
+                current: ShipFrame::MidNorm,
+            },
         }
     }
 }
@@ -81,9 +122,21 @@ impl View for ShipView {
         phi.renderer.set_draw_color(Color::RGB(0, 0, 0));
         phi.renderer.clear();
 
-        // Render the scene
-        phi.renderer.set_draw_color(Color::RGB(200, 200, 50));
-        phi.renderer.fill_rect(self.player.rect.to_sdl().unwrap()).unwrap();
+        // Select the appropriate sprite of the ship to show.
+        self.player.current =
+        if dx == 0.0 && dy < 0.0       { ShipFrame::UpNorm }
+        else if dx > 0.0 && dy < 0.0   { ShipFrame::UpFast }
+        else if dx < 0.0 && dy < 0.0   { ShipFrame::UpSlow }
+        else if dx == 0.0 && dy == 0.0 { ShipFrame::MidNorm }
+        else if dx > 0.0 && dy == 0.0  { ShipFrame::MidFast }
+        else if dx < 0.0 && dy == 0.0  { ShipFrame::MidSlow }
+        else if dx == 0.0 && dy > 0.0  { ShipFrame::DownNorm }
+        else if dx > 0.0 && dy > 0.0   { ShipFrame::DownFast }
+        else if dx < 0.0 && dy > 0.0   { ShipFrame::DownSlow }
+        else { unreachable!() };
+
+        self.player.sprites[self.player.current as usize]
+        .render(&mut phi.renderer, self.player.rect);
 
         ViewAction::None
     }
