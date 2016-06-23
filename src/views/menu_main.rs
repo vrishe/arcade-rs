@@ -84,8 +84,6 @@ impl View for MainMenuView {
         // We determine the scale ratio of the window to the sprite.
         let scale = (win_h / size.1) * ((self.time * 45e-4).sin() + 1.0);
 
-        self.time += elapsed;
-
         // We define a logical position as depending solely on the time and the
         // dimensions of the image, not on the screen's size.
         let sprite_w = size.0 * scale;
@@ -107,17 +105,21 @@ impl View for MainMenuView {
             h: size.1,
         });
 
-        let menuMarginTop = size.1 + 80.0;
+        let menu_margin_top = size.1 + 80.0;
 
         // Render the labels in the menu
         for (i, action) in self.actions.iter().enumerate() {
             if self.selected as usize == i {
                 let (w, h) = action.hover_sprite.size();
+                
+                let sprite_w = w * ((self.time * 6.0).sin().abs() * 0.16 + 1.0);
+                let sprite_x = (win_w - sprite_w) * 0.5;
+
                 action.hover_sprite.render(&mut phi.renderer, Rectangle {
                     //? I suggest trying to draw this on a sheet of paper.
-                    x: (win_w - w) * 0.5,
-                    y: menuMarginTop + 48.0 * i as f64,
-                    w: w,
+                    x: sprite_x,
+                    y: menu_margin_top + 48.0 * i as f64,
+                    w: sprite_w,
                     h: h,
                 });
             } else {
@@ -125,13 +127,13 @@ impl View for MainMenuView {
                 action.idle_sprite.render(&mut phi.renderer, Rectangle {
                     x: (win_w - w) * 0.5,
                     //? We place every element under the previous one.
-                    y: menuMarginTop + 48.0 * i as f64,
+                    y: menu_margin_top + 48.0 * i as f64,
                     w: w,
                     h: h,
                 });
             }
         }
-
+        self.time += elapsed;
 
         ViewAction::None
     }
