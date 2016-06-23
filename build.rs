@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::os::windows;
+use std::option::Option;
 use std::path::Path;
 
 fn main() {
@@ -9,28 +9,36 @@ fn main() {
 
 	match target[target.len() - 2] {
 		"windows" | "win" | "win32" | "win64" | "mingw" | "mingw32" | "mingw64" => {
-			for entry in fs::read_dir("./").unwrap() {
-				let entry = entry.unwrap();
-				let meta = fs::metadata(entry.path()).unwrap();
+			let target_profile_dir = Path::new("./target").join(env::var("PROFILE").unwrap());
 
-				if meta.is_file() {
-					let path = entry.path();
-
-					match path.extension() {
-						Some(value) => {
-							if value.to_str().unwrap().to_lowercase().eq("dll") {
-								let filename = path.file_name().unwrap();
-
-								fs::copy(filename, Path::new("./target").join(env::var("PROFILE").unwrap()).join(filename)).unwrap();
-							}
-						}
-						_ => {}
-					}
-				}
-			}
-			windows::fs::symlink_dir("./assets", Path::new("./target").join(env::var("PROFILE").unwrap()).join("assets"));
+			copy(Path::new("./bin"), &target_profile_dir, Some("dll"));
+			copy(Path::new("./assets"), &target_profile_dir.join("assets"), None);
 		},
 		_ => {}
+	}
+}
+
+fn copy(from: &Path, to: &Path, extension: Option<&str>) {
+	let ext = extension.unwrap_or("*").to_lowercase();
+
+	for entry in fs::read_dir(from).unwrap() {
+		let entry = entry.unwrap();
+
+		if entry.path().is_file() {
+			match entry.path().extension() {
+				Some(value) => {
+					if ext.eq("*") || ext.eq(&value.to_str().unwrap_or("").to_lowercase()) {
+						let target = to.join(entry.path().file_name().unwrap());
+
+						if !target.is_file() {
+							fs::create_dir_all(to).unwrap();
+							fs::copy(entry.path(), target).unwrap();							
+						}
+					}
+				}
+				_ => {}
+			}
+		}
 	}
 }
 
