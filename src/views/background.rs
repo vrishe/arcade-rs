@@ -1,5 +1,5 @@
 use phi::data::Rectangle;
-use phi::gfx::Sprite;
+use phi::gfx::{Renderable, Sprite};
 
 use sdl2::render::Renderer;
 
