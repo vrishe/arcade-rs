@@ -41,8 +41,7 @@ struct_events!{
 /// communicate with the game loop. It specifies which action
 /// should be executed before the next rendering.
 pub enum ViewAction {
-	ChangeView(Box<View>),
-	None,
+	Render(Box<View>),
 	Quit,
 }
 
@@ -55,17 +54,28 @@ pub struct Phi<'window> {
 
 	ttf_context: Sdl2TtfContext,
 	cached_fonts: HashMap<(&'static str, u16), Font>,
+
+	allocated_channels: isize,
 }
 
 impl <'window> Phi<'window> {
 	fn new(events: Events, ttf_context: Sdl2TtfContext, renderer: Renderer<'window>) -> Phi<'window> {
-		Phi {
+		let result = Phi {
 			events: events,
 			renderer: renderer,
 
 			ttf_context: ttf_context,
 			cached_fonts: HashMap::new(),
-		}
+
+			allocated_channels: 32
+		};
+		//? This function asks us how many channels we wish to allocate for our game.
+		//? That is, how many sounds do we wish to be able to play at the same time?
+		//? While testing, 16 channels seemed to be sufficient. Which means that we
+		//? should probably request 32 of 'em just in case. :-°
+		::sdl2_mixer::allocate_channels(result.allocated_channels);
+
+		result
 	}
 
 	pub fn output_size(&self) -> (f64, f64) {
@@ -92,112 +102,124 @@ impl <'window> Phi<'window> {
 			self.ttf_str_sprite(text, font_path, size, color)
 		})
 	}
+
+	/// Play a sound once, and allocate new channels if this is necessary.
+	pub fn play_sound(&mut self, sound: &::sdl2_mixer::Chunk) {
+		// Attempt to play the sound once.
+		match ::sdl2_mixer::Channel::all().play(sound, 0) {
+			Err(_) => {
+				// If there weren't enough channels allocated, then we double
+				// that number and try again.
+				self.allocated_channels *= 2;
+				::sdl2_mixer::allocate_channels(self.allocated_channels);
+
+				self.play_sound(sound);
+			},
+
+		_ => { /* Everything's Alright! */ }
+	}
+}
 }
 
 
 pub trait View {
-	/// Called on every frame to take care of both the logic and
-	/// the rendering of the current view.
-	///
-	/// `elapsed` is expressed in seconds.
-	fn render(&mut self, context: &mut Phi, elapsed: f64) -> ViewAction;
+	/// Called on every frame to take care of the logic of the program. From
+	/// user inputs and the instance's internal state, determine whether to
+	/// render itself or another view, close the window, etc.
+    ///
+    /// `elapsed` is expressed in seconds.
+    fn update(self: Box<Self>, context: &mut Phi, elapsed: f64) -> ViewAction;
+
+    /// Called on every frame to take care rendering the current view. It
+    /// disallows mutating the object by default, although you may still do it
+    /// through a `RefCell` if you need to.
+    fn render(&self, context: &mut Phi);
 }
 
 
 /// Create a window with name `title`, initialize the underlying libraries and
 /// start the game with the `View` returned by `init()`.
-///
-/// # Examples
-///
-/// Here, we simply show a window with color #ffff00 and exit when escape is
-/// pressed or when the window is closed.
-///
-/// ```
-/// struct MyView;
-///
-/// impl View for MyView {
-	///     fn render(&mut self, context: &mut Phi, _: f64) -> ViewAction {
-		///         if context.events.now.quit {
-			///             return ViewAction::Quit;
-			///         }
-///
-///         context.renderer.set_draw_color(Color::RGB(255, 255, 0));
-///         context.renderer.clear();
-///         ViewAction::None
-///     }
-/// }
-///
-/// spawn("Example", |_| {
-	///     Box::new(MyView)
-	/// });
-	/// ```
-	pub fn spawn<F>(title: &str, init: F)
-	where F: Fn(&mut Phi) -> Box<View> {
-		// Initialize SDL2
-		let sdl_context = ::sdl2::init().unwrap();
-		let video = sdl_context.video().unwrap();
-		let mut timer = sdl_context.timer().unwrap();
-		let _image_context = ::sdl2_image::init(::sdl2_image::INIT_PNG).unwrap();
-		let _ttf_context = ::sdl2_ttf::init().unwrap();
+pub fn spawn<F>(title: &str, init: F) where F: Fn(&mut Phi) -> Box<View> {
+	// Initialize SDL2
+	let sdl_context = ::sdl2::init().unwrap();
+	let video = sdl_context.video().unwrap();
+	let mut timer = sdl_context.timer().unwrap();
+	let _image_context = ::sdl2_image::init(::sdl2_image::INIT_PNG).unwrap();
+	let _ttf_context = ::sdl2_ttf::init().unwrap();
 
-		// Create the window
-		let window = video.window(title, 800, 600)
-		.position_centered()
-		.opengl()
-		// .resizable()
-		.build().unwrap();
+	sdl_context.enable_key_repeat(0, 16);
 
-		// Create the context
-		let mut context = Phi::new(
-			Events::new(sdl_context.event_pump().unwrap()), 
-			_ttf_context,
-			window.renderer()
-			.accelerated()
-			.build().unwrap());
+	// Initialize audio plugin
+	//? We will stick to the Ogg format throughout this article. However, you
+	//? can easily require other ones.
+	let _mixer_context = ::sdl2_mixer::init(::sdl2_mixer::INIT_OGG).unwrap();
+	//? We configure our audio context so that:
+	//?   * The frequency is 44100;
+	//?   * Use signed 16 bits samples, in little-endian byte order;
+	//?   * It's also stereo (2 "channels");
+	//?   * Samples are 1024 bytes in size.
+	//? You don't really need to understand what all of this means. I myself just
+	//? copy-pasted this from andelf's demo. ;-)
+	::sdl2_mixer::open_audio(44100, ::sdl2_mixer::AUDIO_S16LSB, 2, 1024).unwrap();
 
-		// Create the default view
-		let mut current_view = init(&mut context);
+	// Create the window
+	let window = video.window(title, 800, 600)
+	.position_centered()
+	.opengl()
+	// .resizable()
+	.build().unwrap();
+
+	// Create the context
+	let mut context = Phi::new(
+		Events::new(sdl_context.event_pump().unwrap()), 
+		_ttf_context,
+		window.renderer()
+		.accelerated()
+		.build().unwrap());
+
+	// Create the default view
+	let mut current_view = init(&mut context);
 
 
-		// Frame timing
+	// Frame timing
 
-		let interval = 1_000 / 60;
-		let mut before = timer.ticks();
-		let mut last_second = timer.ticks();
-		let mut fps = 0u16;
+	let interval = 1_000 / 60;
+	let mut before = timer.ticks();
+	let mut last_second = timer.ticks();
+	let mut fps = 0u16;
 
-		loop {
-			// Frame timing (bis)
+	loop {
+		// Frame timing (bis)
 
-			let now = timer.ticks();
-			let dt = now - before;
-			let elapsed = dt as f64 / 1_000.0;
+		let now = timer.ticks();
+		let dt = now - before;
+		let elapsed = dt as f64 / 1_000.0;
 
-			// If the time elapsed since the last frame is too small, wait out the
-			// difference and try again.
-			if dt < interval {
-				timer.delay(interval - dt);
-				continue;
-			}
+		// If the time elapsed since the last frame is too small, wait out the
+		// difference and try again.
+		if dt < interval {
+			timer.delay(interval - dt);
+			continue;
+		}
 
-			before = now;
-			fps += 1;
+		before = now;
+		fps += 1;
 
-			if now - last_second > 1_000 {
-				println!("FPS: {}", fps);
-				last_second = now;
-				fps = 0;
-			}
+		if now - last_second > 1_000 {
+			println!("FPS: {}", fps);
+			last_second = now;
+			fps = 0;
+		}
+		// Logic & rendering
+		context.events.pump(&mut context.renderer);
 
-
-			// Logic & rendering
-
-			context.events.pump(&mut context.renderer);
-
-			match current_view.render(&mut context, elapsed) {
-				ViewAction::ChangeView(new_view) => current_view = new_view,
-				ViewAction::None => context.renderer.present(),
-				ViewAction::Quit => break,
-			}
+		match current_view.update(&mut context, elapsed) {
+			ViewAction::Render(view) => {
+				current_view = view;
+				current_view.render(&mut context);
+				context.renderer.present();
+			},
+			ViewAction::Quit => break,
 		}
 	}
+}

@@ -3,6 +3,7 @@ use phi::data::Rectangle;
 use phi::gfx::{Renderable, Sprite};
 
 use sdl2::pixels::Color;
+use sdl2_mixer::Music;
 
 use views::background::Background;
 
@@ -18,14 +19,17 @@ pub struct MainMenuView {
     sprite: Sprite,
 
     bg_back: Background,
+
+    music: Music,
 }
 
 impl MainMenuView {
     pub fn new(phi: &mut Phi) -> MainMenuView {
-        MainMenuView {
+
+        let result = MainMenuView {
             actions: vec![
                 Action::new(phi, "New Game", Box::new(|phi| {
-                    ViewAction::ChangeView(Box::new(::views::game::GameView::new(phi)))
+                    ViewAction::Render(Box::new(::views::game::GameView::new(phi)))
                 })),
                 Action::new(phi, "Quit", Box::new(|_| {
                     ViewAction::Quit
@@ -38,12 +42,17 @@ impl MainMenuView {
             logo: Sprite::load(&mut phi.renderer, "assets/logo.png").unwrap(),
             sprite: Sprite::load(&mut phi.renderer, "assets/starAMB.png").unwrap(),
             bg_back: Background::load(&phi.renderer, "assets/starBG.png", 32.0).unwrap(),
-        }
+
+            music: Music::from_file(
+                ::std::path::Path::new("assets/mdk_phoenix_orchestral.ogg")).unwrap()
+        };
+        result.music.play(-1).unwrap();
+        result
     }
 }
 
 impl View for MainMenuView {
-    fn render(&mut self, phi: &mut Phi, elapsed: f64) -> ViewAction {
+    fn update(mut self: Box<Self>,phi: &mut Phi, elapsed: f64) -> ViewAction {
         if phi.events.now.quit || phi.events.now.key_escape == Some(true) {
             return ViewAction::Quit;
         }
@@ -75,6 +84,13 @@ impl View for MainMenuView {
                 self.selected = 0;
             }
         }
+        self.bg_back.update(elapsed);
+        self.time += elapsed;
+
+        ViewAction::Render(self)
+    }
+
+    fn render(&self, phi: &mut Phi) {
         // Clear the screen.
         phi.renderer.set_draw_color(Color::RGB(0, 0, 0));
         phi.renderer.clear();
@@ -95,7 +111,7 @@ impl View for MainMenuView {
             w: sprite_w,
             h: sprite_h,
         });
-        self.bg_back.render(&mut phi.renderer, elapsed);
+        self.bg_back.render(&mut phi.renderer);
 
         let size = self.logo.size();
         self.logo.render(&mut phi.renderer, Rectangle {
@@ -133,9 +149,6 @@ impl View for MainMenuView {
                 });
             }
         }
-        self.time += elapsed;
-
-        ViewAction::None
     }
 }
 
