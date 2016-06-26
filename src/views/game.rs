@@ -1,39 +1,43 @@
 extern crate rand;
 
 use phi::{Phi, View, ViewAction};
-use phi::data::Rectangle;
-use phi::gfx::{Renderable, AnimatedSprite, Sprite};
+use phi::data::{Rectangle, MaybeAlive};
+use phi::gfx::{Renderable, AnimatedSprite, AnimatedSpriteDescr, Sprite};
 
 use sdl2::pixels::Color;
 
 use views::background::Background;
+use views::bullets::{Bullet, CannonType};
 
 
 // Constants
-const SHIP_SPEED: f64 = 180.0;
-const SHIP_W: f64 = 64.0;
-const SHIP_H: f64 = 64.0;
-
 const ASTEROIDS_WIDE: usize = 21;
 const ASTEROIDS_HIGH: usize = 7;
 const ASTEROIDS_TOTAL: usize = ASTEROIDS_WIDE * ASTEROIDS_HIGH - 4;
 const ASTEROID_SIDE: f64 = 96.0;
 
-const BULLET_SPEED: f64 = 240.0;
-const BULLET_W: f64 = 8.0;
-const BULLET_H: f64 = 4.0;
+const EXPLOSIONS_WIDE: usize = 5;
+const EXPLOSIONS_HIGH: usize = 4;
+const EXPLOSIONS_TOTAL: usize = 17;
+const EXPLOSION_SIDE: f64 = 96.0;
+const EXPLOSION_FPS: f64 = 16.0;
+const EXPLOSION_DURATION: f64 = 1.0 / EXPLOSION_FPS * EXPLOSIONS_TOTAL as f64;
+
+const PLAYER_SPEED: f64 = 180.0;
+const PLAYER_W: f64 = 64.0;
+const PLAYER_H: f64 = 64.0;
 
 
-#[cfg(feature = "debugging")]
+#[cfg(feature="debug")]
 const DEBUG: bool = true;
-#[cfg(not(feature = "debugging"))]
+#[cfg(not(feature="debug"))]
 const DEBUG: bool= false;
 
 
-/// The different states our ship might be in. In the image, they're ordered
+/// The different states our Player might be in. In the image, they're ordered
 /// from left to right, then from top to bottom.
 #[derive(Clone, Copy)]
-enum ShipFrame {
+enum PlayerFrame {
 	UpNorm   = 1,
 	UpFast   = 2,
 	UpSlow   = 0,
@@ -54,329 +58,255 @@ struct Asteroid {
 }
 
 impl Asteroid {
-	fn new(phi: &mut Phi) -> Asteroid {
-		let mut asteroid =
-		Asteroid {
-			sprite: Asteroid::get_sprite(phi, 1.0),
-			rect: Rectangle {
-				w: 0.0,
-				h: 0.0,
-				x: 0.0,
-				y: 0.0,
-			},
-			vel: 0.0,
-		};
-
-		asteroid.reset(phi);
-		asteroid
-	}
-
-	fn reset(&mut self, phi: &mut Phi) {
-		let (w, h) = phi.output_size();
-
-		// FPS in [10.0, 30.0)
-		//? `random<f64>()` returns a value between 0 and 1.
-		//? `abs()` returns an absolute value
-		self.sprite.set_fps(self::rand::random::<f64>().abs() * 20.0 + 10.0);
-
-		// rect.y in the screen vertically
-		self.rect = Rectangle {
-			w: ASTEROID_SIDE,
-			h: ASTEROID_SIDE,
-			x: w,
-			y: self::rand::random::<f64>().abs() * (h - ASTEROID_SIDE),
-		};
-
-		// vel in [50.0, 150.0)
-		self.vel = self::rand::random::<f64>().abs() * 100.0 + 50.0;
-	}
-
-	fn get_sprite(phi: &mut Phi, fps: f64) -> AnimatedSprite {
-		let asteroid_spritesheet = Sprite::load(&mut phi.renderer, "assets/asteroid.png").unwrap();
-		let mut asteroid_sprites = Vec::with_capacity(ASTEROIDS_TOTAL);
-
-		for yth in 0..ASTEROIDS_HIGH {
-			for xth in 0..ASTEROIDS_WIDE {
-				//? There are four asteroids missing at the end of the
-				//? spritesheet: we do not want to render those.
-				if ASTEROIDS_WIDE * yth + xth >= ASTEROIDS_TOTAL {
-					break;
-				}
-
-				asteroid_sprites.push(
-					asteroid_spritesheet.region(Rectangle {
-						w: ASTEROID_SIDE,
-						h: ASTEROID_SIDE,
-						x: ASTEROID_SIDE * xth as f64,
-						y: ASTEROID_SIDE * yth as f64,
-					}).unwrap());
-			}
+	fn factory(phi: &mut Phi) -> AsteroidFactory {
+		AsteroidFactory {
+			sprite: AnimatedSprite::with_fps(
+				AnimatedSprite::load_frames(phi, AnimatedSpriteDescr {
+					image_path: "assets/asteroid.png",
+					total_frames: ASTEROIDS_TOTAL,
+					frames_high: ASTEROIDS_HIGH,
+					frames_wide: ASTEROIDS_WIDE,
+					frame_w: ASTEROID_SIDE,
+					frame_h: ASTEROID_SIDE,
+				}), 1.0),
 		}
-		AnimatedSprite::with_fps(asteroid_sprites, fps)
 	}
 
-	fn update(&mut self, phi: &mut Phi, dt: f64) {
+	fn update(mut self, dt: f64) -> Option<Asteroid> {
 		self.rect.x -= dt * self.vel;
 		self.sprite.add_time(dt);
 
-		if self.rect.x <= -ASTEROID_SIDE {
-			self.reset(phi);
-		}
-	}
-
-	fn render(&mut self, phi: &mut Phi) {
-		self.sprite.render(&mut phi.renderer, self.rect);
-	}
-}
-
-
-trait Bullet {
-	/// Update the bullet.
-	/// If the bullet should be destroyed, e.g. because it has left the screen,
-	/// then return `None`.
-	/// Otherwise, return `Some(update_bullet)`.
-	//?
-	//? Notice how we use `Box<Self>` as the type of `self`. This means: keep
-	//? this data behind a pointer, but `move` the pointer. You should note that
-	//? *we are not copying the value*: we are only copying the _address_ at
-	//? which the value is stored in memory, which has a negligible cost. We can
-	//? do this because Rust will automatically free the memory once the `Box`
-	//? that contains it is itself destroyed.
-	fn update(self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>>;
-
-	/// Render the bullet to the screen.
-	//? Here, we take an immutable reference to the bullet, because we do not
-	//? need to change its value to draw it. This is the same as before.
-	fn render(&self, phi: &mut Phi);
-
-	/// Return the bullet's bounding box.
-	//? This is also the same as before.
-	fn rect(&self) -> Rectangle;
-}
-
-
-struct RectBullet {
-	rect: Rectangle,
-}
-
-impl Bullet for RectBullet {
-	fn update(mut self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>> {
-		self.rect.x += BULLET_SPEED * dt;
-
-		let (w, _) = phi.output_size();
-		// If the bullet has left the screen, then delete it.
-		if self.rect.x < w {
+		if self.rect.x > -ASTEROID_SIDE {
 			return Some(self)
 		}
 		None
 	}
 
-	/// Render the bullet to the screen.
 	fn render(&self, phi: &mut Phi) {
-		// We will render this kind of bullet in yellow.
-		//? This is exactly how we drew our first moving rectangle in the
-		//? seventh part of this series.
-		phi.renderer.set_draw_color(Color::RGB(230, 230, 30));
-		phi.renderer.fill_rect(self.rect.to_sdl().unwrap());
+		if DEBUG {
+			// Render the bounding box
+			phi.renderer.set_draw_color(Color::RGB(200, 200, 50));
+			phi.renderer.fill_rect(self.rect().to_sdl().unwrap()).unwrap();
+		}
+		self.sprite.render(&mut phi.renderer, self.rect);
 	}
 
-	/// Return the bullet's bounding box.
 	fn rect(&self) -> Rectangle {
 		self.rect
 	}
 }
 
 
-struct SineBullet {
-	//? Notice that the bounding box isn't stored directly. This means that
-	//? we do not keep useless information. It also implies that we must compute
-	//? the `sin` function every time we attempt to get the bounding box.
-	pos_x: f64,
-	origin_y: f64,
-	amplitude: f64,
-	angular_vel: f64,
-	total_time: f64,
+struct AsteroidFactory {
+	sprite: AnimatedSprite,
 }
 
-impl Bullet for SineBullet {
-	fn update(mut self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>> {
-		//? We store the total time...
-		self.total_time += dt;
-		self.pos_x += BULLET_SPEED * dt;
-
-		let (w, _) = phi.output_size();
-		// If the bullet has left the screen, then delete it.
-		if self.rect().x < w {
-			return Some(self)
-		}
-		None
-	}
-
-	/// Render the bullet to the screen.
-	fn render(&self, phi: &mut Phi) {
-		// We will render this kind of bullet in yellow.
-		//? This is exactly how we drew our first moving rectangle in the
-		//? seventh part of this series.
-		phi.renderer.set_draw_color(Color::RGB(230, 230, 30));
-		phi.renderer.fill_rect(self.rect().to_sdl().unwrap());
-	}
-
-	/// Return the bullet's bounding box.
-	fn rect(&self) -> Rectangle {
-		//? Just the general form of the sine function, minus the initial time.
-		let dy = self.amplitude * f64::sin(self.angular_vel * self.total_time);
-		Rectangle {
-			x: self.pos_x,
-			y: self.origin_y + dy,
-			w: BULLET_W,
-			h: BULLET_H,
-		}
-	}
-}
-
-
-/// Bullet which follows a vertical trajectory given by:
-///     a * ((t / b)^3 - (t / b)^2)
-struct DivergentBullet {
-	pos_x: f64,
-	origin_y: f64,
-	a: f64, // Influences the bump's height
-	b: f64, // Influences the bump's width
-	total_time: f64,
-}
-
-impl Bullet for DivergentBullet {
-	fn update(mut self: Box<Self>, phi: &mut Phi, dt: f64) -> Option<Box<Bullet>> {
-		self.total_time += dt;
-		self.pos_x += BULLET_SPEED * dt;
-
-		// If the bullet has left the screen, then delete it.
+impl AsteroidFactory {
+	fn random(&self, phi: &mut Phi) -> Asteroid {
 		let (w, h) = phi.output_size();
-		let rect = self.rect();
 
-		if rect.x < w && rect.x >= 0.0 &&
-		rect.y < h && rect.y >= 0.0 {
-			return Some(self)
+		// FPS in [10.0, 30.0)
+		let mut sprite = self.sprite.clone();
+		sprite.set_fps(self::rand::random::<f64>().abs() * 20.0 + 10.0);
+
+		Asteroid {
+			sprite: sprite,
+
+			// In the screen vertically, and over the right of the screen
+			// horizontally.
+			rect: Rectangle {
+				w: ASTEROID_SIDE,
+				h: ASTEROID_SIDE,
+				x: w,
+				y: self::rand::random::<f64>().abs() * (h - ASTEROID_SIDE),
+			},
+
+			// vel in [50.0, 150.0)
+			vel: self::rand::random::<f64>().abs() * 100.0 + 50.0,
+		}
+	}
+}
+
+
+struct Explosion {
+	sprite: AnimatedSprite,
+	rect: Rectangle,
+
+	//? Keep how long its been arrived, so that we destroy the explosion once
+	//? its animation is finished.
+	alive_since: f64,
+}
+
+impl Explosion {
+	fn factory(phi: &mut Phi) -> ExplosionFactory {
+		ExplosionFactory {
+			sprite: AnimatedSprite::with_fps(
+				AnimatedSprite::load_frames(phi, AnimatedSpriteDescr {
+					image_path: "assets/explosion.png",
+					total_frames: EXPLOSIONS_TOTAL,
+					frames_high: EXPLOSIONS_HIGH,
+					frames_wide: EXPLOSIONS_WIDE,
+					frame_w: EXPLOSION_SIDE,
+					frame_h: EXPLOSION_SIDE,
+				}), EXPLOSION_FPS),
+		}
+	}
+
+	fn update(mut self, dt: f64) -> Option<Explosion> {
+		self.alive_since += dt;
+		self.sprite.add_time(dt);
+
+		if self.alive_since < EXPLOSION_DURATION {
+			return Some(self);
 		}
 		None
 	}
 
 	fn render(&self, phi: &mut Phi) {
-		// We will render this kind of bullet in yellow.
-		phi.renderer.set_draw_color(Color::RGB(230, 230, 30));
-		phi.renderer.fill_rect(self.rect().to_sdl().unwrap());
+		self.sprite.render(&mut phi.renderer, self.rect);
 	}
+}
 
-	fn rect(&self) -> Rectangle {
-		let dy = self.a *
-		((self.total_time / self.b).powi(3) -
-			(self.total_time / self.b).powi(2));
 
-		Rectangle {
-			x: self.pos_x,
-			y: self.origin_y + dy,
-			w: BULLET_W,
-			h: BULLET_H,
+struct ExplosionFactory {
+	sprite: AnimatedSprite,
+}
+
+impl ExplosionFactory {
+	fn at_center(&self, center: (f64, f64)) -> Explosion {
+		// FPS in [10.0, 30.0)
+		let sprite = self.sprite.clone();
+
+		Explosion {
+			sprite: sprite,
+
+			// In the screen vertically, and over the right of the screen
+			// horizontally.
+			rect: Rectangle::with_size(EXPLOSION_SIDE, EXPLOSION_SIDE)
+			.center_at(center),
+
+			alive_since: 0.0,
 		}
 	}
 }
 
 
-#[derive(Clone, Copy)]
-enum CannonType {
-	RectBullet,
-	SineBullet { amplitude: f64, angular_vel: f64 },
-	DivergentBullet { a: f64, b: f64 },
-}
-
-struct Ship {
+struct Player {
 	rect: Rectangle,
 	sprites: Vec<Sprite>,
-	current: ShipFrame,
+	current: PlayerFrame,
 
 	cannon: CannonType,
 }
 
-impl Ship {
-	fn spawn_bullets(&self) -> Vec<Box<Bullet>> {
+impl Player {
+	pub fn spawn_bullets(&self) -> Vec<Box<Bullet>> {
 		let cannons_x = self.rect.x + 30.0;
 		let cannon1_y = self.rect.y + 6.0;
-		let cannon2_y = self.rect.y + SHIP_H - 10.0;
+		let cannon2_y = self.rect.y + PLAYER_H - 10.0;
 
-		match self.cannon {
-			CannonType::RectBullet => {
-				// One bullet at the tip of every cannon
-				//? We could modify the initial position of the bullets by matching on
-				//? `self.current : ShipFrame`, however there is not much point to this
-				//? pedagogy-wise. You can try it out if you want. ;)
-				vec![
-				Box::new(RectBullet {
-					rect: Rectangle {
-						x: cannons_x,
-						y: cannon1_y,
-						w: BULLET_W,
-						h: BULLET_H,
-					}
-				}),
-				Box::new(RectBullet {
-					rect: Rectangle {
-						x: cannons_x,
-						y: cannon2_y,
-						w: BULLET_W,
-						h: BULLET_H,
-					}
-				}),
-				]
-			},
-			CannonType::SineBullet { amplitude, angular_vel } => {
-				vec![
-				Box::new(SineBullet {
-					pos_x: cannons_x,
-					origin_y: cannon1_y,
-					amplitude: amplitude,
-					angular_vel: angular_vel,
-					total_time: 0.0,
-				}),
-				Box::new(SineBullet {
-					pos_x: cannons_x,
-					origin_y: cannon2_y,
-					amplitude: amplitude,
-					angular_vel: angular_vel,
-					total_time: 0.0,
-				}),
-				]
-			},
-			CannonType::DivergentBullet { a, b } => {
-				vec![
-				// If a,b > 0, eventually goes upwards
-				Box::new(DivergentBullet {
-					pos_x: cannons_x,
-					origin_y: cannon1_y,
-					a: -a,
-					b: b,
-					total_time: 0.0,
-				}),
-				// If a,b > 0, eventually goes downwards
-				Box::new(DivergentBullet {
-					pos_x: cannons_x,
-					origin_y: cannon2_y,
-					a: a,
-					b: b,
-					total_time: 0.0,
-				}),
-				]
-			},
+		::views::bullets::spawn_bullets(self.cannon, cannons_x, cannon1_y, cannon2_y)
+	}
+
+	pub fn update(&mut self, phi: &mut Phi, elapsed: f64) {
+		// Change the player's cannons
+
+		if phi.events.now.key_1 == Some(true) {
+			self.cannon = CannonType::RectBullet;
 		}
 
+		if phi.events.now.key_2 == Some(true) {
+			self.cannon = CannonType::SineBullet {
+				amplitude: 10.0,
+				angular_vel: 15.0,
+			};
+		}
+
+		if phi.events.now.key_3 == Some(true) {
+			self.cannon = CannonType::DivergentBullet {
+				a: 100.0,
+				b: 1.2,
+			};
+		}
+
+		// Move the player's ship
+
+		let diagonal =
+		(phi.events.key_up ^ phi.events.key_down) &&
+		(phi.events.key_left ^ phi.events.key_right);
+
+		let moved =
+		if diagonal { 1.0 / 2.0f64.sqrt() }
+		else { 1.0 } * PLAYER_SPEED * elapsed;
+
+		let dx = match (phi.events.key_left, phi.events.key_right) {
+			(true, true) | (false, false) => 0.0,
+			(true, false) => -moved,
+			(false, true) => moved,
+		};
+
+		let dy = match (phi.events.key_up, phi.events.key_down) {
+			(true, true) | (false, false) => 0.0,
+			(true, false) => -moved,
+			(false, true) => moved,
+		};
+
+		self.rect.x += dx;
+		self.rect.y += dy;
+
+		// The movable region spans the entire height of the window and 70% of its
+		// width. This way, the player cannot get to the far right of the screen, where
+		// we will spawn the asteroids, and get immediately eliminated.
+		//
+		// We restrain the width because most screens are wider than they are high.
+		let movable_region = Rectangle {
+			x: 0.0,
+			y: 0.0,
+			w: phi.output_size().0 as f64 * 0.70,
+			h: phi.output_size().1 as f64,
+		};
+
+		// If the player cannot fit in the screen, then there is a problem and
+		// the game should be promptly aborted.
+		self.rect = self.rect.move_inside(movable_region).unwrap();
+
+		// Select the appropriate sprite of the ship to show.
+		self.current =
+		if dx == 0.0 && dy < 0.0       { PlayerFrame::UpNorm }
+		else if dx > 0.0 && dy < 0.0   { PlayerFrame::UpFast }
+		else if dx < 0.0 && dy < 0.0   { PlayerFrame::UpSlow }
+		else if dx == 0.0 && dy == 0.0 { PlayerFrame::MidNorm }
+		else if dx > 0.0 && dy == 0.0  { PlayerFrame::MidFast }
+		else if dx < 0.0 && dy == 0.0  { PlayerFrame::MidSlow }
+		else if dx == 0.0 && dy > 0.0  { PlayerFrame::DownNorm }
+		else if dx > 0.0 && dy > 0.0   { PlayerFrame::DownFast }
+		else if dx < 0.0 && dy > 0.0   { PlayerFrame::DownSlow }
+		else { unreachable!() };
+	}
+
+	pub fn render(&self, phi: &mut Phi) {
+		// Render the bounding box (for debugging purposes)
+		if DEBUG {
+			phi.renderer.set_draw_color(Color::RGB(200, 200, 50));
+			phi.renderer.fill_rect(self.rect.to_sdl().unwrap()).unwrap();
+		}
+
+		// Render the ship's current sprite.
+		self.sprites[self.current as usize]
+		.render(&mut phi.renderer, self.rect);
 	}
 }
 
 
-pub struct ShipView {
-	player: Ship,
+pub struct GameView {
+	player: Player,
 
-	asteroid: Asteroid,
+	asteroid_factory: AsteroidFactory,
+	explosion_factory: ExplosionFactory,
+
+	asteroids: Vec<Asteroid>,
 	bullets: Vec<Box<Bullet>>,
+	explosions: Vec<Explosion>,
 
 	bg_ambient: Background,
 	bg_back: Background,
@@ -384,8 +314,8 @@ pub struct ShipView {
 	bg_front: Background,
 }
 
-impl ShipView {
-	pub fn new (phi: &mut Phi) -> ShipView {
+impl GameView {
+	pub fn new (phi: &mut Phi) -> GameView {
 		let spritesheet = Sprite::load(&mut phi.renderer, "assets/spaceship2.png").unwrap();
 
 		//? When we know in advance how many elements the `Vec` we contain, we
@@ -406,25 +336,26 @@ impl ShipView {
 				}).unwrap());
 			}
 		}      
-		ShipView {
-			player: Ship {
+		GameView {
+			player: Player {
 				rect: Rectangle {
 					x: 64.0,
 					y: 64.0,
-					w: SHIP_W,
-					h: SHIP_H,
+					w: PLAYER_W,
+					h: PLAYER_H,
 				},
 				sprites: sprites,
-				current: ShipFrame::MidNorm,
+				current: PlayerFrame::MidNorm,
 
 				//? Let `RectBullet` be the default kind of bullet.
 				cannon: CannonType::RectBullet,
 			},
-			asteroid: Asteroid::new(phi),
-			//? We start with no bullets. Because the size of the vector will
-			//? change drastically throughout the program, there is not much
-			//? point in giving it a capacity.
+			asteroid_factory: Asteroid::factory(phi),
+			explosion_factory: Explosion::factory(phi),
+
+			asteroids: vec![],
 			bullets: vec![],
+			explosions: vec![],
 
 			bg_ambient: Background::load(&phi.renderer, "assets/starAMB.png", 0.0).unwrap(),
 			bg_back: Background::load(&phi.renderer, "assets/starBG.png", 20.0).unwrap(),
@@ -434,7 +365,7 @@ impl ShipView {
 	}
 }
 
-impl View for ShipView {
+impl View for GameView {
 	fn render(&mut self, phi: &mut Phi, elapsed: f64) -> ViewAction {
 		if phi.events.now.quit {
 			return ViewAction::Quit;
@@ -442,76 +373,8 @@ impl View for ShipView {
 		if phi.events.now.key_escape == Some(true) {
 			return ViewAction::ChangeView(Box::new(::views::menu_main::MainMenuView::new(phi)));
 		}
-		// Change the player's cannons
+		self.player.update(phi, elapsed);
 
-		if phi.events.now.key_1 == Some(true) {
-			self.player.cannon = CannonType::RectBullet;
-		}
-		if phi.events.now.key_2 == Some(true) {
-			self.player.cannon = CannonType::SineBullet {
-				amplitude: 10.0,
-				angular_vel: 15.0,
-			};
-		}
-		if phi.events.now.key_3 == Some(true) {
-			self.player.cannon = CannonType::DivergentBullet {
-				a: 100.0,
-				b: 1.2,
-			};
-		}
-		let diagonal = 
-		(phi.events.key_up ^ phi.events.key_down) && 
-		(phi.events.key_left ^ phi.events.key_right);
-
-		let moved =
-		if diagonal { 1.0 / 2.0f64.sqrt() }
-		else { 1.0 } * SHIP_SPEED * elapsed;
-
-		let dx = match (phi.events.key_left, phi.events.key_right) {
-			(true, true) | (false, false) => 0.0,
-			(true, false) => -moved,
-			(false, true) => moved,
-		};
-
-		let dy = match (phi.events.key_up, phi.events.key_down) {
-			(true, true) | (false, false) => 0.0,
-			(true, false) => -moved,
-			(false, true) => moved,
-		};
-
-		self.player.rect.x += dx;
-		self.player.rect.y += dy;
-
-		// The movable region spans the entire height of the window and 70% of its
-		// width. This way, the player cannot get to the far right of the screen, where
-		// we will spawn the asteroids, and get immediately eliminated.
-		//
-		// We restrain the width because most screens are wider than they are high.
-		let movable_region = Rectangle {
-			x: 0.0,
-			y: 0.0,
-			w: phi.output_size().0 * 0.70,
-			h: phi.output_size().1,
-		};
-
-		self.player.rect = self.player.rect.move_inside(movable_region).unwrap();
-
-		// Select the appropriate sprite of the ship to show.
-		self.player.current =
-		if dx == 0.0 && dy < 0.0       { ShipFrame::UpNorm }
-		else if dx > 0.0 && dy < 0.0   { ShipFrame::UpFast }
-		else if dx < 0.0 && dy < 0.0   { ShipFrame::UpSlow }
-		else if dx == 0.0 && dy == 0.0 { ShipFrame::MidNorm }
-		else if dx > 0.0 && dy == 0.0  { ShipFrame::MidFast }
-		else if dx < 0.0 && dy == 0.0  { ShipFrame::MidSlow }
-		else if dx == 0.0 && dy > 0.0  { ShipFrame::DownNorm }
-		else if dx > 0.0 && dy > 0.0   { ShipFrame::DownFast }
-		else if dx < 0.0 && dy > 0.0   { ShipFrame::DownSlow }
-		else { unreachable!() };
-
-		// Update bullets
-		//? Set `self.bullets` to be the empty vector, and put its content inside of
-		//? `old_bullets`, which we can move without borrow-checker issues.
 		let old_bullets = ::std::mem::replace(&mut self.bullets, vec![]);
 
 		//? Upon assignment, the old value of `self.bullets`, namely the empty vector,
@@ -522,9 +385,79 @@ impl View for ShipView {
 		.filter_map(|bullet| bullet.update(phi, elapsed))
 		.collect();
 
-		// Update the asteroid
-		self.asteroid.update(phi, elapsed);
+		// Update the asteroids
+		self.asteroids =
+		::std::mem::replace(&mut self.asteroids, vec![])
+		.into_iter()
+		.filter_map(|asteroid| asteroid.update(elapsed))
+		.collect();
 
+		// Update the explosions
+		self.explosions =
+		::std::mem::replace(&mut self.explosions, vec![])
+		.into_iter()
+		.filter_map(|explosion| explosion.update(elapsed))
+		.collect();
+
+		//? We keep track of whether or not the player is alive.
+		let mut player_alive = true;
+
+		//? First, go through the bullets and wrap them in a `MaybeAlive`, so that we
+		//? can keep track of which got into a collision and which did not.
+		let mut transition_bullets: Vec<_> =
+		::std::mem::replace(&mut self.bullets, vec![])
+		.into_iter()
+		.map(|bullet| MaybeAlive { alive: true, value: bullet })
+		.collect();
+
+		self.asteroids =
+		::std::mem::replace(&mut self.asteroids, vec![])
+		.into_iter()
+		.filter_map(|asteroid| {
+			// By default, the asteroid has not been in a collision.
+			let mut asteroid_alive = true;
+
+			for bullet in &mut transition_bullets {
+				//? Notice that we refer to the bullet as `bullet.value`
+				//? because it has been wrapped in `MaybeAlive`.
+				if asteroid.rect().overlaps(bullet.value.rect()) {
+					asteroid_alive = false;
+					//? We go through every bullet and "kill" those that collide
+					//? with the asteroid. We do this for every asteroid.
+					bullet.alive = false;
+				}
+			}
+			// The player's Player is destroyed if it is hit by an asteroid.
+			// In which case, the asteroid is also destroyed.
+			if asteroid.rect().overlaps(self.player.rect) {
+				asteroid_alive = false;
+				player_alive = false;
+			}
+			//? Then, we use the magic of `filter_map` to keep only the asteroids
+			//? that didn't explode.
+			if asteroid_alive {
+				return Some(asteroid)
+			}
+			self.explosions.push(
+				self.explosion_factory.at_center(
+					asteroid.rect().center()));
+
+			None
+		})
+		.collect();
+
+		//? Finally, we use once again the magic of `filter_map` to keep only the
+		//? bullets that are still alive.
+		self.bullets = transition_bullets.into_iter()
+		.filter_map(MaybeAlive::as_option)
+		.collect();
+
+		// TODO
+		// For the moment, we won't do anything about the player dying. This will be
+		// the subject of a future episode.
+		if !player_alive {
+			println!("The player's Player has been destroyed.");
+		}
 		// Allow the player to shoot after the bullets are updated, so that,
 		// when rendered for the first time, they are drawn wherever they
 		// spawned.
@@ -538,7 +471,11 @@ impl View for ShipView {
 		if phi.events.now.key_space == Some(true) {
 			self.bullets.append(&mut self.player.spawn_bullets());
 		}
-
+		// Randomly create an asteroid about once every 100 frames, that is,
+		// a bit more often than once every two seconds.
+		if self::rand::random::<usize>() % 100 == 0 {
+			self.asteroids.push(self.asteroid_factory.random(phi));
+		}
 		// Clear the screen
 		phi.renderer.set_draw_color(Color::RGB(0, 0, 0));
 		phi.renderer.clear();
@@ -548,19 +485,19 @@ impl View for ShipView {
 		self.bg_back.render(&mut phi.renderer, elapsed);
 		self.bg_middle.render(&mut phi.renderer, elapsed);
 
-		// Render the bounding box (for debugging purposes)
-		if DEBUG {
-			phi.renderer.set_draw_color(Color::RGB(200, 200, 50));
-			phi.renderer.fill_rect(self.player.rect.to_sdl().unwrap()).unwrap();
+		// Render asteroids
+		for asteroid in &self.asteroids {
+			asteroid.render(phi);
 		}
-		self.player.sprites[self.player.current as usize]
-		.render(&mut phi.renderer, self.player.rect);
+		self.player.render(phi);
 
-		// Render the asteroid
-		self.asteroid.render(phi);
-		// Render the bullets
+		// Render bullets
 		for bullet in &self.bullets {
 			bullet.render(phi);
+		}
+		// Render explosions
+		for explosion in &self.explosions {
+			explosion.render(phi);
 		}
 		// Render the foreground
 		self.bg_front.render(&mut phi.renderer, elapsed);

@@ -1,4 +1,5 @@
 use phi::data::Rectangle;
+use phi::Phi;
 
 use sdl2::render::{Renderer, Texture};
 use sdl2_image::LoadTexture;
@@ -11,7 +12,7 @@ use std::rc::Rc;
 /// Common interface for rendering a graphical component to some given region
 /// of the window.
 pub trait Renderable {
-    fn render(&self, renderer: &mut Renderer, dest: Rectangle);
+	fn render(&self, renderer: &mut Renderer, dest: Rectangle);
 }
 
 
@@ -57,13 +58,12 @@ impl Sprite {
 
 		// Verify that the requested region is inside of the current one
 		if self.src.contains(new_src) {
-			Some(Sprite {
+			return Some(Sprite {
 				tex: self.tex.clone(),
 				src: new_src,
 			})
-		} else {
-			None
 		}
+		None
 	}
 
 	// Returns the dimensions of the region.
@@ -92,8 +92,17 @@ pub struct AnimatedSprite {
 	current_time: f64,
 }
 
+pub struct AnimatedSpriteDescr<'a> {
+	pub image_path: &'a str,
+	pub total_frames: usize,
+	pub frames_high: usize,
+	pub frames_wide: usize,
+	pub frame_w: f64,
+	pub frame_h: f64,
+}
 
-impl AnimatedSprite {
+
+impl AnimatedSprite {	
 	/// Creates a new animated sprite initialized at time 0.
 	pub fn new(sprites: Vec<Sprite>, frame_delay: f64) -> AnimatedSprite {
 		AnimatedSprite {
@@ -102,6 +111,33 @@ impl AnimatedSprite {
 			current_time: 0.0,
 		}
 	}
+
+
+	pub fn load_frames(phi: &mut Phi, descr: AnimatedSpriteDescr) -> Vec<Sprite> {
+		// Read the asteroid's image from the filesystem and construct an
+		// animated sprite out of it.
+
+		let spritesheet = Sprite::load(&mut phi.renderer, descr.image_path).unwrap();
+		let mut frames = Vec::with_capacity(descr.total_frames);
+
+		for yth in 0..descr.frames_high {
+			for xth in 0..descr.frames_wide {
+				if descr.frames_wide * yth + xth >= descr.total_frames {
+					break;
+				}
+
+				frames.push(
+					spritesheet.region(Rectangle {
+						w: descr.frame_w,
+						h: descr.frame_h,
+						x: descr.frame_w * xth as f64,
+						y: descr.frame_h * yth as f64,
+					}).unwrap());
+			}
+		}
+		frames
+	}
+
 
 	/// Creates a new animated sprite which goes to the next frame `fps` times
 	/// every second.
@@ -171,11 +207,11 @@ impl Renderable for AnimatedSprite {
 
 
 pub trait CopySprite<T> {
-    fn copy_sprite(&mut self, sprite: &T, dest: Rectangle);
+	fn copy_sprite(&mut self, sprite: &T, dest: Rectangle);
 }
 
 impl<'window, T: Renderable> CopySprite<T> for Renderer<'window> {
-    fn copy_sprite(&mut self, renderable: &T, dest: Rectangle) {
-       renderable.render(self, dest);
-   }
+	fn copy_sprite(&mut self, renderable: &T, dest: Rectangle) {
+		renderable.render(self, dest);
+	}
 }

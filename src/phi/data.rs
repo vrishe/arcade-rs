@@ -11,6 +11,36 @@ pub struct Rectangle {
 }
 
 impl Rectangle {
+
+	/// Generate a rectangle with the provided size, with its top-left corner
+	/// at (0, 0).
+	pub fn with_size(w: f64, h: f64) -> Rectangle {
+		Rectangle {
+			w: w,
+			h: h,
+			x: 0.0,
+			y: 0.0,
+		}
+	}
+
+
+	/// Centers
+	pub fn center_at(self, center: (f64, f64)) -> Rectangle {
+		Rectangle {
+			x: center.0 - self.w / 2.0,
+			y: center.1 - self.h / 2.0,
+			..self
+		}
+	}
+
+	/// Return the center of the rectangle.
+	pub fn center(self) -> (f64, f64) {
+		let x = self.x + self.w / 2.0;
+		let y = self.y + self.h / 2.0;
+		(x, y)
+	}
+
+
 	/// Generates an SDL-compatible Rect equivalent to `self`.
 	/// Panics if it could not be created, for example if a
 	/// coordinate of a corner overflows an `i32`.
@@ -60,5 +90,23 @@ impl Rectangle {
 		self.x + self.w > other.x &&
 		self.y < other.y + other.h &&
 		self.y + self.h > other.y
+	}
+}
+
+
+pub struct MaybeAlive<T> {
+	pub alive: bool,
+	pub value: T,
+}
+
+impl<T> MaybeAlive<T> {
+	/// Checks whether the value is still alive. If this is the case, then
+	/// return `Some(value)`; otherwise, return `None`.
+	pub fn as_option(self) -> Option<T> {
+		if self.alive {
+			Some(self.value)
+		} else {
+			None
+		}
 	}
 }
