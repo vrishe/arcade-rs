@@ -30,6 +30,8 @@ const PLAYER_SPEED: f64 = 180.0;
 const PLAYER_W: f64 = 64.0;
 const PLAYER_H: f64 = 64.0;
 
+const SHOT_DELAY: f64 = 1.0 / 7.62;
+
 
 #[cfg(feature="debug")]
 const DEBUG: bool = true;
@@ -303,6 +305,7 @@ impl Player {
 
 pub struct GameView {
 	player: Player,
+	shot_time: f64,
 
 	asteroid_factory: AsteroidFactory,
 	explosion_factory: ExplosionFactory,
@@ -341,7 +344,7 @@ impl GameView {
 					y: h * y as f64,
 				}).unwrap());
 			}
-		} 
+		}
 		GameView {
 			player: Player {
 				rect: Rectangle {
@@ -356,6 +359,8 @@ impl GameView {
 				//? Let `RectBullet` be the default kind of bullet.
 				cannon: CannonType::RectBullet,
 			},
+			shot_time: SHOT_DELAY,
+
 			asteroid_factory: Asteroid::factory(phi),
 			explosion_factory: Explosion::factory(phi),
 
@@ -382,7 +387,8 @@ impl View for GameView {
 		if phi.events.now.key_escape == Some(true) {
 			return ViewAction::Render(Box::new(::views::menu_main::MainMenuView::new(phi)));
 		}
-
+		// This is a tricky 'game' update block, as we have troubles
+		// with the way, how Rust handles runtime safety for references.
 		{
 			let game = &mut *self;
 
@@ -472,10 +478,23 @@ impl View for GameView {
 			//? The `Vec::append` method moves the content of `spawn_bullets` at
 			//? the end of `game.bullets`. After this is done, the vector returned
 			//? by `spawn_bullets` will be empty.
-			if phi.events.now.key_space == Some(true) {
-				game.bullets.append(&mut game.player.spawn_bullets());
+			if phi.events.key_space {
+				let mut shots_fired = (game.shot_time / SHOT_DELAY) as isize;
 
-				phi.play_sound(&game.bullet_sound);
+				if shots_fired > 0 {
+					game.shot_time = 0.0;
+
+					while shots_fired > 0 {
+						game.bullets.append(&mut game.player.spawn_bullets());
+
+						phi.play_sound(&game.bullet_sound);
+						shots_fired -= 1;
+					}					
+				} else {
+					game.shot_time += elapsed;
+				}				
+			} else {
+				game.shot_time = SHOT_DELAY;
 			}
 			// Randomly create an asteroid about once every 100 frames, that is,
 			// a bit more often than once every two seconds.

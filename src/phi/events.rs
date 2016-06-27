@@ -101,8 +101,7 @@ macro_rules! struct_events {
 							),*
 
 						_ => {
-							$(
-								self.now.$o_alias = false;
+							$(self.now.$o_alias = false;
 								),*
 						}
 					}

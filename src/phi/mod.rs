@@ -147,8 +147,6 @@ pub fn spawn<F>(title: &str, init: F) where F: Fn(&mut Phi) -> Box<View> {
 	let _image_context = ::sdl2_image::init(::sdl2_image::INIT_PNG).unwrap();
 	let _ttf_context = ::sdl2_ttf::init().unwrap();
 
-	sdl_context.enable_key_repeat(0, 16);
-
 	// Initialize audio plugin
 	//? We will stick to the Ogg format throughout this article. However, you
 	//? can easily require other ones.
