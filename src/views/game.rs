@@ -66,14 +66,14 @@ impl Asteroid {
 	fn factory(phi: &mut Phi) -> AsteroidFactory {
 		AsteroidFactory {
 			sprite: AnimatedSprite::with_fps(
-				AnimatedSprite::load_frames(phi, AnimatedSpriteDescr {
+				AnimatedSprite::load_frames_with_alpha(phi, AnimatedSpriteDescr {
 					image_path: "assets/asteroid.png",
 					total_frames: ASTEROIDS_TOTAL,
 					frames_high: ASTEROIDS_HIGH,
 					frames_wide: ASTEROIDS_WIDE,
 					frame_w: ASTEROID_SIDE,
 					frame_h: ASTEROID_SIDE,
-				}), 1.0),
+				}, 255), 1.0),
 		}
 	}
 
@@ -205,6 +205,43 @@ struct Player {
 }
 
 impl Player {
+	pub fn new(phi: &mut Phi) -> Player {
+		let spritesheet = Sprite::load_with_alpha(&mut phi.renderer, "assets/spaceship2.png", 255u8).unwrap();
+
+		//? When we know in advance how many elements the `Vec` we contain, we
+		//? can allocate the good amount of data up-front.
+		let mut sprites = Vec::with_capacity(9);
+
+		let (w, h) = spritesheet.size();
+		let w = w / 3.0;
+		let h = h / 3.0;
+
+		for y in 0..3 {
+			for x in 0..3 {
+				sprites.push(spritesheet.region(Rectangle {
+					w: w,
+					h: h,
+					x: w * x as f64,
+					y: h * y as f64,
+				}).unwrap());
+			}
+		}
+		Player {
+			rect: Rectangle {
+				x: 64.0,
+				y: 64.0,
+				w: PLAYER_W,
+				h: PLAYER_H,
+			},
+			sprites: sprites,
+			current: PlayerFrame::MidNorm,
+
+			//? Let `RectBullet` be the default kind of bullet.
+			cannon: CannonType::RectBullet,
+		}	
+	}
+
+
 	pub fn spawn_bullets(&self) -> Vec<Box<Bullet>> {
 		let cannons_x = self.rect.x + 30.0;
 		let cannon1_y = self.rect.y + 6.0;
@@ -325,40 +362,9 @@ pub struct GameView {
 
 impl GameView {
 	pub fn new (phi: &mut Phi) -> GameView {
-		let spritesheet = Sprite::load(&mut phi.renderer, "assets/spaceship2.png").unwrap();
 
-		//? When we know in advance how many elements the `Vec` we contain, we
-		//? can allocate the good amount of data up-front.
-		let mut sprites = Vec::with_capacity(9);
-
-		let (w, h) = spritesheet.size();
-		let w = w / 3.0;
-		let h = h / 3.0;
-
-		for y in 0..3 {
-			for x in 0..3 {
-				sprites.push(spritesheet.region(Rectangle {
-					w: w,
-					h: h,
-					x: w * x as f64,
-					y: h * y as f64,
-				}).unwrap());
-			}
-		}
 		GameView {
-			player: Player {
-				rect: Rectangle {
-					x: 64.0,
-					y: 64.0,
-					w: PLAYER_W,
-					h: PLAYER_H,
-				},
-				sprites: sprites,
-				current: PlayerFrame::MidNorm,
-
-				//? Let `RectBullet` be the default kind of bullet.
-				cannon: CannonType::RectBullet,
-			},
+			player: Player::new(phi),
 			shot_time: SHOT_DELAY,
 
 			asteroid_factory: Asteroid::factory(phi),

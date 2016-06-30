@@ -12,6 +12,30 @@ pub struct Rectangle {
 
 impl Rectangle {
 
+	pub fn intersection(rect_a: Rectangle, rect_b: Rectangle) -> Option<Rectangle> {
+		let (xl, xr) = Self::minmax(rect_a.x, rect_b.x);
+		let (yt, yb) = Self::minmax(rect_a.y, rect_b.y);
+		let (wi, hi) = (xr - xl, yb - yt);
+
+		if wi > 0.0 && hi > 0.0 {
+			return Some(Rectangle {
+				w: wi,
+				h: hi,
+				x: xl,
+				y: yt
+			});
+		}
+		None
+	}
+
+	fn minmax<T: PartialOrd + Copy>(a: T, b: T) -> (T, T) {
+		if a < b {
+			return (a, b);
+		}
+		(b, a)
+	}
+
+
 	/// Generate a rectangle with the provided size, with its top-left corner
 	/// at (0, 0).
 	pub fn with_size(w: f64, h: f64) -> Rectangle {
@@ -25,16 +49,16 @@ impl Rectangle {
 
 
 	/// Centers
-	pub fn center_at(self, center: (f64, f64)) -> Rectangle {
+	pub fn center_at(&self, center: (f64, f64)) -> Rectangle {
 		Rectangle {
 			x: center.0 - self.w / 2.0,
 			y: center.1 - self.h / 2.0,
-			..self
+			..*self
 		}
 	}
 
 	/// Return the center of the rectangle.
-	pub fn center(self) -> (f64, f64) {
+	pub fn center(&self) -> (f64, f64) {
 		let x = self.x + self.w / 2.0;
 		let y = self.y + self.h / 2.0;
 		(x, y)
@@ -44,7 +68,7 @@ impl Rectangle {
 	/// Generates an SDL-compatible Rect equivalent to `self`.
 	/// Panics if it could not be created, for example if a
 	/// coordinate of a corner overflows an `i32`.
-	pub fn to_sdl(self) -> Option<SdlRect> {
+	pub fn to_sdl(&self) -> Option<SdlRect> {
 		// Reject negative width and height
 		assert!(self.w >= 0.0 && self.h >= 0.0);
 
@@ -55,22 +79,21 @@ impl Rectangle {
 	/// Return a (perhaps moved) rectangle which is contained by a `parent`
 	/// rectangle. If it can indeed be moved to fit, return `Some(result)`;
 	/// otherwise, return `None`.
-	pub fn move_inside(self, parent: Rectangle) -> Option<Rectangle> {
+	pub fn move_inside(&self, parent: Rectangle) -> Option<Rectangle> {
 		// It must be smaller than the parent rectangle to fit in it.
-		if self.w > parent.w || self.h > parent.h {
-			return None;
+		if self.w <= parent.w && self.h <= parent.h {
+			return 		Some(Rectangle {
+				w: self.w,
+				h: self.h,
+				x: if self.x < parent.x { parent.x }
+				else if self.x + self.w >= parent.x + parent.w { parent.x + parent.w - self.w }
+				else { self.x },
+				y: if self.y < parent.y { parent.y }
+				else if self.y + self.h >= parent.y + parent.h { parent.y + parent.h - self.h }
+				else { self.y },
+			})
 		}
-
-		Some(Rectangle {
-			w: self.w,
-			h: self.h,
-			x: if self.x < parent.x { parent.x }
-			else if self.x + self.w >= parent.x + parent.w { parent.x + parent.w - self.w }
-			else { self.x },
-			y: if self.y < parent.y { parent.y }
-			else if self.y + self.h >= parent.y + parent.h { parent.y + parent.h - self.h }
-			else { self.y },
-		})
+		None
 	}
 
 	pub fn contains(&self, rect: Rectangle) -> bool {

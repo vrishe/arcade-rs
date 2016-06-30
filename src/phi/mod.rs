@@ -89,7 +89,7 @@ impl <'window> Phi<'window> {
 		if let Some(font) = self.cached_fonts.get(&(font_path, size)) {
 			return font.render(text).blended(color).ok()
 			.and_then(|surface| self.renderer.create_texture_from_surface(&surface).ok())
-			.map(Sprite::new)
+			.map(Sprite::from_texture)
 		}
 		//? Otherwise, we start by trying to load the requested font.
 		self.ttf_context.load_font(Path::new(font_path), size).ok()
