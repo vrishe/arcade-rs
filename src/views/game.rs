@@ -2,12 +2,15 @@ extern crate rand;
 
 use phi::{Phi, View, ViewAction};
 use phi::data::{Rectangle, MaybeAlive};
-use phi::gfx::{Renderable, AnimatedSprite, AnimatedSpriteDescr, Sprite};
+use phi::gfx::{AlphaChannel, AnimatedSprite, AnimatedSpriteDescr, Collide, BoxCollide, Renderable, Sprite};
 
 use sdl2::pixels::Color;
+use sdl2::rwops::RWops;
+use sdl2_image::ImageRWops;
 use sdl2_mixer::Chunk;
 
 use std::path::Path;
+use std::rc::Rc;
 
 use views::background::Background;
 use views::bullets::{Bullet, CannonType};
@@ -55,25 +58,67 @@ enum PlayerFrame {
 }
 
 
+trait GameBody {
+
+	fn rect(&self) -> &Rectangle; 
+
+	fn frame(&self) -> Rectangle;
+
+	fn alpha(&self) -> &AlphaChannel; 
+
+	fn collide(&self, another: &GameBody) -> bool {
+		Rectangle::intersection(self.rect(), another.rect())
+		.map_or(false, |intersection| {
+			let (self_frame, another_frame) = (self.frame(), another.frame());
+
+			<AlphaChannel as Collide>::collide(self.alpha(), self.rect().x - self_frame.x, self.rect().y - self_frame.y, 
+				another.alpha(), another.rect().x - another_frame.x, another.rect().y - another_frame.y, intersection)
+		})
+	}
+
+	fn overlap(&self, area: &Rectangle) -> bool {
+		Rectangle::intersection(self.rect(), area)
+		.map_or(false, |intersection| {
+			let self_frame = self.frame();
+
+			<AlphaChannel as BoxCollide>::collide(self.alpha(), self.rect().x - self_frame.x, self.rect().y - self_frame.y, intersection)
+		})
+	}
+}
+
+
 // Data types
 struct Asteroid {
-	sprite: AnimatedSprite,
 	rect: Rectangle,
+	sprite: AnimatedSprite,
+
+	alpha: AlphaChannel,
+
 	vel: f64,
 }
 
 impl Asteroid {
 	fn factory(phi: &mut Phi) -> AsteroidFactory {
-		AsteroidFactory {
-			sprite: AnimatedSprite::with_fps(
-				AnimatedSprite::load_frames_with_alpha(phi, AnimatedSpriteDescr {
-					image_path: "assets/asteroid.png",
-					total_frames: ASTEROIDS_TOTAL,
-					frames_high: ASTEROIDS_HIGH,
-					frames_wide: ASTEROIDS_WIDE,
-					frame_w: ASTEROID_SIDE,
-					frame_h: ASTEROID_SIDE,
-				}, 255), 1.0),
+		let surface_reader = RWops::from_file("assets/asteroid.png", "rb").unwrap();
+		let surface = surface_reader.load().unwrap();
+
+		let spritesheet = Sprite::from_surface(&phi.renderer, &surface).unwrap();
+
+		unsafe {
+			AsteroidFactory {
+				alpha: Rc::new(AlphaChannel::from_surface(&surface, Some(127u8)).unwrap()),
+				sprite: AnimatedSprite::new(
+					AnimatedSprite::load_frames(
+						&spritesheet, 
+						AnimatedSpriteDescr {
+							total_frames: ASTEROIDS_TOTAL,
+							frames_high: ASTEROIDS_HIGH,
+							frames_wide: ASTEROIDS_WIDE,
+							frame_w: ASTEROID_SIDE,
+							frame_h: ASTEROID_SIDE,
+						}),
+					0.0),
+			}
 		}
 	}
 
@@ -91,18 +136,29 @@ impl Asteroid {
 		if DEBUG {
 			// Render the bounding box
 			phi.renderer.set_draw_color(Color::RGB(200, 200, 50));
-			phi.renderer.fill_rect(self.rect().to_sdl().unwrap()).unwrap();
+			phi.renderer.fill_rect(self.rect.to_sdl().unwrap()).unwrap();
 		}
 		self.sprite.render(&mut phi.renderer, self.rect);
 	}
+}
 
-	fn rect(&self) -> Rectangle {
-		self.rect
+impl<'a> GameBody for Asteroid {
+	fn rect(&self) -> &Rectangle {
+		&self.rect
+	}
+
+	fn frame(&self) -> Rectangle {
+		self.sprite.get_frame_at(self.sprite.current_frame_index()).frame()
+	}
+
+	fn alpha(&self) -> &AlphaChannel {
+		&self.alpha
 	}
 }
 
 
 struct AsteroidFactory {
+	alpha: Rc<AlphaChannel>,
 	sprite: AnimatedSprite,
 }
 
@@ -112,11 +168,10 @@ impl AsteroidFactory {
 
 		// FPS in [10.0, 30.0)
 		let mut sprite = self.sprite.clone();
+
 		sprite.set_fps(self::rand::random::<f64>().abs() * 20.0 + 10.0);
 
 		Asteroid {
-			sprite: sprite,
-
 			// In the screen vertically, and over the right of the screen
 			// horizontally.
 			rect: Rectangle {
@@ -125,6 +180,9 @@ impl AsteroidFactory {
 				x: w,
 				y: self::rand::random::<f64>().abs() * (h - ASTEROID_SIDE),
 			},
+			sprite: sprite,
+
+			alpha: self.alpha.as_ref().clone(),
 
 			// vel in [50.0, 150.0)
 			vel: self::rand::random::<f64>().abs() * 100.0 + 50.0,
@@ -134,8 +192,8 @@ impl AsteroidFactory {
 
 
 struct Explosion {
-	sprite: AnimatedSprite,
 	rect: Rectangle,
+	sprite: AnimatedSprite,
 
 	//? Keep how long its been arrived, so that we destroy the explosion once
 	//? its animation is finished.
@@ -145,15 +203,16 @@ struct Explosion {
 impl Explosion {
 	fn factory(phi: &mut Phi) -> ExplosionFactory {
 		ExplosionFactory {
-			sprite: AnimatedSprite::with_fps(
-				AnimatedSprite::load_frames(phi, AnimatedSpriteDescr {
-					image_path: "assets/explosion.png",
+			sprite: AnimatedSprite::load_with_fps(
+				"assets/explosion.png", 
+				phi, AnimatedSpriteDescr {
 					total_frames: EXPLOSIONS_TOTAL,
 					frames_high: EXPLOSIONS_HIGH,
 					frames_wide: EXPLOSIONS_WIDE,
 					frame_w: EXPLOSION_SIDE,
 					frame_h: EXPLOSION_SIDE,
-				}), EXPLOSION_FPS),
+				}, 
+				EXPLOSION_FPS),
 		}
 	}
 
@@ -199,15 +258,19 @@ impl ExplosionFactory {
 struct Player {
 	rect: Rectangle,
 	sprites: Vec<Sprite>,
-	current: PlayerFrame,
+
+	alpha: AlphaChannel,
 
 	cannon: CannonType,
+	current: PlayerFrame,
 }
 
 impl Player {
 	pub fn new(phi: &mut Phi) -> Player {
-		let spritesheet = Sprite::load_with_alpha(&mut phi.renderer, "assets/spaceship2.png", 255u8).unwrap();
+		let surface_reader = RWops::from_file("assets/spaceship2.png", "rb").unwrap();
+		let surface = surface_reader.load().unwrap();
 
+		let spritesheet = Sprite::from_surface(&phi.renderer, &surface).unwrap();
 		//? When we know in advance how many elements the `Vec` we contain, we
 		//? can allocate the good amount of data up-front.
 		let mut sprites = Vec::with_capacity(9);
@@ -226,18 +289,22 @@ impl Player {
 				}).unwrap());
 			}
 		}
-		Player {
-			rect: Rectangle {
-				x: 64.0,
-				y: 64.0,
-				w: PLAYER_W,
-				h: PLAYER_H,
-			},
-			sprites: sprites,
-			current: PlayerFrame::MidNorm,
+		unsafe {
+			Player {
+				rect: Rectangle {
+					x: 64.0,
+					y: 64.0,
+					w: PLAYER_W,
+					h: PLAYER_H,
+				},
+				sprites: sprites,
 
-			//? Let `RectBullet` be the default kind of bullet.
-			cannon: CannonType::RectBullet,
+				alpha: AlphaChannel::from_surface(&surface, Some(127u8)).unwrap(),
+
+				//? Let `RectBullet` be the default kind of bullet.
+				cannon: CannonType::RectBullet,
+				current: PlayerFrame::MidNorm,
+			}
 		}	
 	}
 
@@ -249,6 +316,7 @@ impl Player {
 
 		::views::bullets::spawn_bullets(self.cannon, cannons_x, cannon1_y, cannon2_y)
 	}
+
 
 	pub fn update(&mut self, phi: &mut Phi, elapsed: f64) {
 		// Change the player's cannons
@@ -336,6 +404,20 @@ impl Player {
 		// Render the ship's current sprite.
 		self.sprites[self.current as usize]
 		.render(&mut phi.renderer, self.rect);
+	}
+}
+
+impl GameBody for Player {
+	fn rect(&self) -> &Rectangle {
+		&self.rect
+	}
+
+	fn frame(&self) -> Rectangle {
+		self.sprites[self.current as usize].frame()
+	}
+
+	fn alpha(&self) -> &AlphaChannel {
+		&self.alpha
 	}
 }
 
@@ -432,7 +514,7 @@ impl View for GameView {
 				for bullet in &mut transition_bullets {
 					//? Notice that we refer to the bullet as `bullet.value`
 					//? because it has been wrapped in `MaybeAlive`.
-					if asteroid.rect().overlaps(bullet.value.rect()) {
+					if asteroid.overlap(&bullet.value.rect()) {
 						asteroid_alive = false;
 						//? We go through every bullet and "kill" those that collide
 						//? with the asteroid. We do this for every asteroid.
@@ -441,7 +523,7 @@ impl View for GameView {
 				}
 				// The player's Player is destroyed if it is hit by an asteroid.
 				// In which case, the asteroid is also destroyed.
-				if asteroid.rect().overlaps(game.player.rect) {
+				if asteroid.collide(&game.player) {
 					asteroid_alive = false;
 					player_alive = false;
 				}
@@ -452,7 +534,7 @@ impl View for GameView {
 				}
 				game.explosions.push(
 					game.explosion_factory.at_center(
-						asteroid.rect().center()));
+						asteroid.rect.center()));
 
 				phi.play_sound(&game.explosion_sound);
 
@@ -470,7 +552,7 @@ impl View for GameView {
 			// For the moment, we won't do anything about the player dying. This will be
 			// the subject of a future episode.
 			if !player_alive {
-				println!("The player's Player has been destroyed.");
+				println!("The player's Ship has been destroyed.");
 			}
 			game.player.update(phi, elapsed);
 

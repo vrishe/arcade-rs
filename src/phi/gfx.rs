@@ -10,6 +10,7 @@ use sdl2_image::LoadTexture;
 use self::sdl2_sys::pixels as ll;
 
 use std::cell::RefCell;
+use std::ops::Index;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -20,65 +21,223 @@ macro_rules! aligned (
 	}
 );
 
-pub unsafe fn extract_alpha(surface: &Surface, threshold: Option<u8>) -> Vec<usize> {
-	let pixel_format = surface.pixel_format().raw();
 
-	match (*pixel_format).format {
-		ll::SDL_PIXELFORMAT_ARGB4444 | ll::SDL_PIXELFORMAT_RGBA4444 | ll::SDL_PIXELFORMAT_ABGR4444 | ll::SDL_PIXELFORMAT_BGRA4444 | 
-		ll::SDL_PIXELFORMAT_ARGB1555 | ll::SDL_PIXELFORMAT_RGBA5551 | ll::SDL_PIXELFORMAT_ABGR1555 | ll::SDL_PIXELFORMAT_BGRA5551 |
-		ll::SDL_PIXELFORMAT_ARGB8888 | ll::SDL_PIXELFORMAT_RGBA8888 | ll::SDL_PIXELFORMAT_ABGR8888 | ll::SDL_PIXELFORMAT_BGRA8888 |
-		ll::SDL_PIXELFORMAT_ARGB2101010 => {
+#[derive(Clone)]
+pub struct AlphaChannel {
+	data: Vec<usize>,
 
-			let threshold = threshold.unwrap_or(255u8);
-			let read_alpha: Box<Fn(*const u8) -> u8> = match (*pixel_format).format {
-				ll::SDL_PIXELFORMAT_ARGB4444 | ll::SDL_PIXELFORMAT_RGBA4444 | ll::SDL_PIXELFORMAT_ABGR4444 | ll::SDL_PIXELFORMAT_BGRA4444 | 
-				ll::SDL_PIXELFORMAT_ARGB1555 | ll::SDL_PIXELFORMAT_RGBA5551 | ll::SDL_PIXELFORMAT_ABGR1555 | ll::SDL_PIXELFORMAT_BGRA5551 => {
-					Box::new(|pixels: *const u8| {
-						((*(pixels as *const u16) >> (*pixel_format).Ashift) << (*pixel_format).Aloss) as u8
-					})
-				},
-				ll::SDL_PIXELFORMAT_ARGB8888 | ll::SDL_PIXELFORMAT_RGBA8888 | ll::SDL_PIXELFORMAT_ABGR8888 | ll::SDL_PIXELFORMAT_BGRA8888 |
-				ll::SDL_PIXELFORMAT_ARGB2101010 => {
-					Box::new(|pixels: *const u8| { 
-						((*(pixels as *const u32) >> (*pixel_format).Ashift) << (*pixel_format).Aloss) as u8
-					})
-				},
-				_ => unreachable!()
-			};
-			let read_pixels = |pixels: &[u8]| {
-				let size_usize = ::std::mem::size_of::<usize>(); // bytes
-				let size_packed = aligned!(aligned!((surface.width() * surface.height()) as usize; 8); size_usize);
+	stride: usize,
+	
+	height: u32,
+	width: u32,	
+}
 
-				let mut result: Vec<usize> = vec![0; size_packed];
-				{
-					let result_mutable = &mut result;
-					let pixels_ptr = &pixels[0] as *const u8;
-					let size_usize = size_usize as usize * 8; // bits
-					let color_depth = (*pixel_format).BytesPerPixel as u32;
-					
-					for y in 0..surface.height() {
-						let stride = y * surface.width();
-						let row = pixels_ptr.offset((y * surface.pitch()) as isize);
-						
-						for x in 0..surface.width() {
-							if read_alpha(row.offset((x * color_depth) as isize)) >= threshold {
-								let i = (stride + x) as usize;
+pub trait Collide {
+	fn collide(channel_a: &AlphaChannel, x_a: f64, y_a: f64, channel_b: &AlphaChannel, x_b: f64, y_b: f64, roi: Rectangle) -> bool;
+}
 
-								result_mutable[i / size_usize] |= 1usize << (i % size_usize);
+pub trait BoxCollide {
+	fn collide(channel: &AlphaChannel, x: f64, y: f64, roi: Rectangle) -> bool;	
+}
+
+impl AlphaChannel {
+
+	pub unsafe fn from_surface(surface: &Surface, threshold: Option<u8>) -> Option<AlphaChannel> {
+		let pixel_format = surface.pixel_format().raw();
+
+		match (*pixel_format).format {
+			ll::SDL_PIXELFORMAT_ARGB4444 | ll::SDL_PIXELFORMAT_RGBA4444 | ll::SDL_PIXELFORMAT_ABGR4444 | ll::SDL_PIXELFORMAT_BGRA4444 | 
+			ll::SDL_PIXELFORMAT_ARGB1555 | ll::SDL_PIXELFORMAT_RGBA5551 | ll::SDL_PIXELFORMAT_ABGR1555 | ll::SDL_PIXELFORMAT_BGRA5551 |
+			ll::SDL_PIXELFORMAT_ARGB8888 | ll::SDL_PIXELFORMAT_RGBA8888 | ll::SDL_PIXELFORMAT_ABGR8888 | ll::SDL_PIXELFORMAT_BGRA8888 |
+			ll::SDL_PIXELFORMAT_ARGB2101010 => {
+
+				let threshold = threshold.unwrap_or(255u8);
+				let read_alpha: Box<Fn(*const u8) -> u8> = match (*pixel_format).format {
+					ll::SDL_PIXELFORMAT_ARGB4444 | ll::SDL_PIXELFORMAT_RGBA4444 | ll::SDL_PIXELFORMAT_ABGR4444 | ll::SDL_PIXELFORMAT_BGRA4444 | 
+					ll::SDL_PIXELFORMAT_ARGB1555 | ll::SDL_PIXELFORMAT_RGBA5551 | ll::SDL_PIXELFORMAT_ABGR1555 | ll::SDL_PIXELFORMAT_BGRA5551 => {
+						Box::new(|pixels: *const u8| {
+							((*(pixels as *const u16) >> (*pixel_format).Ashift) << (*pixel_format).Aloss) as u8
+						})
+					},
+					ll::SDL_PIXELFORMAT_ARGB8888 | ll::SDL_PIXELFORMAT_RGBA8888 | ll::SDL_PIXELFORMAT_ABGR8888 | ll::SDL_PIXELFORMAT_BGRA8888 |
+					ll::SDL_PIXELFORMAT_ARGB2101010 => {
+						Box::new(|pixels: *const u8| { 
+							((*(pixels as *const u32) >> (*pixel_format).Ashift) << (*pixel_format).Aloss) as u8
+						})
+					},
+					_ => unreachable!()
+				};
+				let read_pixels = |pixels: &[u8]| {
+					let size_usize = ::std::mem::size_of::<usize>() * 8; // bytes
+					let size_packed = aligned!(surface.width() as usize; size_usize);
+
+					let mut result: Vec<usize> = vec![0; size_packed * surface.height() as usize];
+					{
+						let result_mutable = &mut result;
+						let pixels_ptr = &pixels[0] as *const u8;
+						let color_depth = (*pixel_format).BytesPerPixel as usize;
+
+						for y in 0usize..surface.height() as usize {
+							let stride = y * size_packed;
+							let row = pixels_ptr.offset((y * surface.pitch() as usize) as isize);
+
+							for x in 0usize..surface.width() as usize {
+								if read_alpha(row.offset((x * color_depth) as isize)) >= threshold {
+									result_mutable[stride + x / size_usize] |= 1usize << (x % size_usize);
+								}
 							}
-						}
-					}					
-				}
-				result	
-			};
-			match surface.without_lock() {
-				Some(pixels) => read_pixels(pixels),
-				None => surface.with_lock(read_pixels)
-			}	
-		},
-		_ => panic!("Surface does not contain alpha channel!")
+						}					
+					}
+					AlphaChannel {
+						data: result,
+
+						stride: size_packed,
+
+						height: surface.height(),
+						width: surface.width(),				
+					}
+				};
+				Some(match surface.without_lock() {
+					Some(pixels) => read_pixels(pixels),
+					None => surface.with_lock(read_pixels)
+				})
+			},
+			_ => None
+		}
+	}
+
+
+	pub fn stride(&self) -> usize {
+		self.stride
+	}
+
+	pub fn width(&self) -> u32 {
+		self.width
+	}
+
+	pub fn height(&self) -> u32 {
+		self.height
+	}
+
+	pub fn size(&self) -> (u32, u32) {
+		(self.width, self.height)
 	}
 }
+
+impl Index<usize> for AlphaChannel {
+	type Output = usize;
+
+	fn index<'a>(&'a self, _index: usize) -> &'a usize {
+		&self.data[_index]
+	}
+}
+
+impl Collide for AlphaChannel {
+
+	fn collide(channel_a: &AlphaChannel, x_a: f64, y_a: f64, channel_b: &AlphaChannel, x_b: f64, y_b: f64, roi: Rectangle) -> bool {
+		let roi_a = Rectangle {
+			x: roi.x - x_a,
+			y: roi.y - y_a,
+			..roi
+		};
+		let roi_b = Rectangle {
+			x: roi.x - x_b,
+			y: roi.y - y_b,
+			..roi
+		};
+		let size_usize = ::std::mem::size_of::<usize>() * 8;
+
+		let (x_a, x_b) = (roi_a.x.round() as usize, roi_b.x.round() as usize);
+		let (y_a, y_b) = (roi_a.y.round() as usize, roi_b.y.round() as usize);
+		let (w, h) = (aligned!(roi.w.round() as usize; size_usize), roi.h.round() as usize);
+
+		if w > 0 {
+			let (shift_a, shift_b) = (x_a % size_usize, x_b % size_usize);
+			let (maskl_a, maskl_b) = ((2usize << shift_a).wrapping_sub(1), (2usize << shift_b).wrapping_sub(1));
+			let (maskr_a, maskr_b) = (::std::usize::MAX << shift_a, ::std::usize::MAX << shift_b);
+
+			let (x_a, x_b) = (x_a / size_usize, x_b / size_usize);
+			let rlast = w - 1;
+
+			for c in 0..h {
+				let (row_a, row_b) = ((y_a + c) * channel_a.stride() + x_a, (y_b + c) * channel_b.stride() + x_b);
+
+				if w > 1 {
+					for r in 0..w {
+						let (mut block_a, mut block_b) = (channel_a[row_a + r], channel_b[row_b + r]);
+
+						if r == 0 {
+							block_a &= maskl_a;
+							block_b &= maskl_b;
+						}
+						if r == rlast {
+							block_a &= maskr_a;
+							block_b &= maskr_b;
+						}
+						if block_a != 0 && block_b != 0 {
+							return true;
+						}
+					}
+				} else {
+					if ((channel_a[row_a] >> shift_a) & 1 != 0) && ((channel_b[row_b] >> shift_b) & 1 != 0) {
+						return true;
+					}
+				}
+			}
+		}
+		false
+	}
+}
+
+impl BoxCollide for AlphaChannel {
+
+	fn collide(channel: &AlphaChannel, x: f64, y: f64, roi: Rectangle) -> bool {
+		let roi = Rectangle {
+			x: roi.x - x,
+			y: roi.y - y,
+			..roi
+		};
+		let size_usize = ::std::mem::size_of::<usize>() * 8;
+
+		let (x, y) = (roi.x.round() as usize, roi.y.round() as usize);
+		let (w, h) = (aligned!(roi.w.round() as usize; size_usize), roi.h.round() as usize);
+
+		if w > 0 {
+			let shift = x % size_usize;
+			let maskl = (2usize << shift).wrapping_sub(1);
+			let maskr = ::std::usize::MAX << shift;
+
+			let x = x / size_usize;
+			let rlast = w - 1;
+
+			for c in 0..h {
+				let row = (c + y) * channel.stride() + x;
+
+				if w > 1 {
+					for r in 0..w {
+						let mut block = channel[row + r];
+
+						if r == 0 {
+							block &= maskl;
+						}
+						if r == rlast {
+							block &= maskr;
+						}
+						if block != 0 {
+							return true;
+						}
+					}					
+				} else {
+					if (channel[row] >> shift) & 1 != 0 {
+						return true;
+					}
+				}
+			}			
+		}
+		false
+	}
+}
+
 
 /// Common interface for rendering a graphical component to some given region
 /// of the window.
@@ -89,8 +248,6 @@ pub trait Renderable {
 
 #[derive(Clone)]
 pub struct Sprite {
-	alpha: Option<Rc<RefCell<Vec<usize>>>>,
-
 	tex: Rc<RefCell<Texture>>,
 	src: Rectangle,
 }
@@ -98,12 +255,10 @@ pub struct Sprite {
 
 impl Sprite {
 	/// Creates a new sprite by wrapping a `Texture`.
-	fn new(texture: Texture, alpha: Option<Vec<usize>>) -> Sprite {
+	fn new(texture: Texture) -> Sprite {
 		let tex_query = texture.query();
 
 		Sprite {
-			alpha: alpha.map_or(None, |v| Some(Rc::new(RefCell::new(v)))),
-
 			tex: Rc::new(RefCell::new(texture)),
 			src: Rectangle {
 				w: tex_query.width as f64,
@@ -116,28 +271,18 @@ impl Sprite {
 
 
 	pub fn from_texture(texture: Texture) -> Sprite {
-		Sprite::new(texture, None)
+		Sprite::new(texture)
+	}
+
+	pub fn from_surface(renderer: &Renderer, surface: &Surface) -> Option<Sprite> {
+		renderer.create_texture_from_surface(surface).ok().map(Sprite::new)
 	}
 
 
 	/// Creates a new sprite from an image file located at the given path.
 	/// Returns `Some` if the file could be read, and `None` otherwise.
 	pub fn load(renderer: &Renderer, path: &str) -> Option<Sprite> {
-		renderer.load_texture(Path::new(path)).ok().map(|v| Sprite::new(v, None))
-	}
-
-	pub fn load_with_alpha(renderer: &Renderer, path: &str, alpha_threshold: u8) -> Option<Sprite> {
-		use sdl2::rwops::RWops;
-		use sdl2_image::ImageRWops;
-
-		let surface_reader = RWops::from_file(path, "rb").unwrap();
-
-		unsafe {
-			let surface =surface_reader.load().unwrap();
-			let alpha = Some(extract_alpha(&surface, Some(alpha_threshold)));
-
-			renderer.create_texture_from_surface(surface).ok().map(|v| Sprite::new(v, alpha))	
-		}
+		renderer.load_texture(Path::new(path)).ok().map(Sprite::new)
 	}
 
 	/// Returns a new `Sprite` representing a sub-region of the current one.
@@ -154,7 +299,6 @@ impl Sprite {
 		// Verify that the requested region is inside of the current one
 		if self.src.contains(new_src) {
 			return Some(Sprite {
-				alpha: self.alpha.clone(),
 				tex: self.tex.clone(),
 				src: new_src,
 			})
@@ -165,6 +309,10 @@ impl Sprite {
 	// Returns the dimensions of the region.
 	pub fn size(&self) -> (f64, f64) {
 		(self.src.w, self.src.h)
+	}
+
+	pub fn frame(&self) -> Rectangle {
+		self.src
 	}
 }
 
@@ -189,8 +337,7 @@ pub struct AnimatedSprite {
 	current_frame: usize,
 }
 
-pub struct AnimatedSpriteDescr<'a> {
-	pub image_path: &'a str,
+pub struct AnimatedSpriteDescr {
 	pub total_frames: usize,
 	pub frames_high: usize,
 	pub frames_wide: usize,
@@ -210,26 +357,25 @@ impl AnimatedSprite {
 		}
 	}
 
+	pub fn load(path: &str, phi: &mut Phi, descr: AnimatedSpriteDescr) -> AnimatedSprite {
+		let spritesheet = Sprite::load(&mut phi.renderer, path).unwrap();
 
-	pub fn load_frames(phi: &mut Phi, descr: AnimatedSpriteDescr) -> Vec<Sprite> {
-		// Read the spritesheet image from the filesystem and construct an
-		// animated sprite out of it.
-
-		let spritesheet = Sprite::load(&mut phi.renderer, descr.image_path).unwrap();
-		
-		Self::load_frames_impl(&spritesheet, &descr)
+		AnimatedSprite::new(Self::load_frames(&spritesheet, descr), 0.0)
 	}
 
-	pub fn load_frames_with_alpha(phi: &mut Phi, descr: AnimatedSpriteDescr, alpha_threshold: u8) -> Vec<Sprite> {
-		// Read the spritesheet image from the filesystem and construct an
-		// animated sprite out of it.
+	pub fn load_with_fps(path: &str, phi: &mut Phi, descr: AnimatedSpriteDescr, fps: f64) -> AnimatedSprite {
+		if fps == 0.0 {
+			panic!("Passed 0 to AnimatedSprite::with_fps");
+		}
+		let spritesheet = Sprite::load(&mut phi.renderer, path).unwrap();
 
-		let spritesheet = Sprite::load_with_alpha(&mut phi.renderer, descr.image_path, alpha_threshold).unwrap();
-		
-		Self::load_frames_impl(&spritesheet, &descr)
+		AnimatedSprite::new(Self::load_frames(&spritesheet, descr), 1f64 / fps)
 	}
 
-	fn load_frames_impl(spritesheet: &Sprite, descr: &AnimatedSpriteDescr) -> Vec<Sprite> {
+
+	pub fn load_frames(spritesheet: &Sprite, descr: AnimatedSpriteDescr) -> Vec<Sprite> {
+		// Read the spritesheet image from the filesystem and construct an
+		// animated sprite out of it.
 		let mut frames = Vec::with_capacity(descr.total_frames);
 
 		for yth in 0..descr.frames_high {
@@ -245,29 +391,7 @@ impl AnimatedSprite {
 				}
 			}
 		}
-		frames		
-	}
-
-
-	/// Creates a new animated sprite which goes to the next frame `fps` times
-	/// every second.
-	pub fn with_fps(sprites: Vec<Sprite>, fps: f64) -> AnimatedSprite {
-		//? Logically, a value of 0FPS might mean "stop changing frames".
-		//? However, there's not really a need for this functionality in this
-		//? game.
-		//?
-		//? If you would like to implement this functionality yourself, I would
-		//? suggest that you add a `current_frame` attribute to `AnimatedSprite`
-		//? which is used whenever `frame_delay`, in this scenario of type
-		//? `Option<f64>`, is `None` (where `None` == infinity).
-		//?
-		//? Then, when `with_fps` or `set_fps` gets a value of 0, you compute
-		//? the current frame and assign it to `current_frame`, then set
-		//? `frame_delay` to `None`. The rest is yours to solve.
-		if fps == 0.0 {
-			panic!("Passed 0 to AnimatedSprite::with_fps");
-		}
-		AnimatedSprite::new(sprites, 1.0 / fps)
+		frames	
 	}
 
 

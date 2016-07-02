@@ -12,9 +12,9 @@ pub struct Rectangle {
 
 impl Rectangle {
 
-	pub fn intersection(rect_a: Rectangle, rect_b: Rectangle) -> Option<Rectangle> {
-		let (xl, xr) = Self::minmax(rect_a.x, rect_b.x);
-		let (yt, yb) = Self::minmax(rect_a.y, rect_b.y);
+	pub fn intersection(rect_a: &Rectangle, rect_b: &Rectangle) -> Option<Rectangle> {
+		let (xl, xr) = (rect_a.x.max(rect_b.x), (rect_a.x + rect_a.w).min(rect_b.x + rect_b.w));
+		let (yt, yb) = (rect_a.y.max(rect_b.y), (rect_a.y + rect_a.h).min(rect_b.y + rect_b.h));
 		let (wi, hi) = (xr - xl, yb - yt);
 
 		if wi > 0.0 && hi > 0.0 {
@@ -26,13 +26,6 @@ impl Rectangle {
 			});
 		}
 		None
-	}
-
-	fn minmax<T: PartialOrd + Copy>(a: T, b: T) -> (T, T) {
-		if a < b {
-			return (a, b);
-		}
-		(b, a)
 	}
 
 
