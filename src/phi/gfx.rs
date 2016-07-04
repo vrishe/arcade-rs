@@ -135,52 +135,57 @@ impl Index<usize> for AlphaChannel {
 impl Collide for AlphaChannel {
 
 	fn collide(channel_a: &AlphaChannel, x_a: f64, y_a: f64, channel_b: &AlphaChannel, x_b: f64, y_b: f64, roi: Rectangle) -> bool {
-		let roi_a = Rectangle {
-			x: roi.x - x_a,
-			y: roi.y - y_a,
-			..roi
-		};
-		let roi_b = Rectangle {
-			x: roi.x - x_b,
-			y: roi.y - y_b,
-			..roi
-		};
-		let size_usize = ::std::mem::size_of::<usize>() * 8;
-
-		let (x_a, x_b) = (roi_a.x.round() as usize, roi_b.x.round() as usize);
-		let (y_a, y_b) = (roi_a.y.round() as usize, roi_b.y.round() as usize);
-		let (w, h) = (aligned!(roi.w.round() as usize; size_usize), roi.h.round() as usize);
+		let (w, h) = (roi.w.round() as usize, roi.h.round() as usize);
 
 		if w > 0 {
-			let (shift_a, shift_b) = (x_a % size_usize, x_b % size_usize);
-			let (maskl_a, maskl_b) = ((2usize << shift_a).wrapping_sub(1), (2usize << shift_b).wrapping_sub(1));
-			let (maskr_a, maskr_b) = (::std::usize::MAX << shift_a, ::std::usize::MAX << shift_b);
+			let (x_a, x_b) = ((roi.x - x_a).round() as usize, (roi.x - x_b).round() as usize);
+			let (y_a, y_b) = ((roi.y - y_a).round() as usize, (roi.y - y_b).round() as usize);
 
-			let (x_a, x_b) = (x_a / size_usize, x_b / size_usize);
-			let rlast = w - 1;
+			let (xlast_a, xlast_b) = (x_a + w, x_b + w);
 
-			for c in 0..h {
-				let (row_a, row_b) = ((y_a + c) * channel_a.stride() + x_a, (y_b + c) * channel_b.stride() + x_b);
+			let size_usize = ::std::mem::size_of::<usize>() * 8;
+			let (shift_a, x_a) = (x_a % size_usize, x_a / size_usize);
+			let (shift_b, x_b) = (x_b % size_usize, x_b / size_usize);
+			let (trail_a, w_a) = (xlast_a % size_usize, xlast_a / size_usize - x_a);
+			let (trail_b, w_b) = (xlast_b % size_usize, xlast_b / size_usize - x_b);
 
-				if w > 1 {
+			let (w_a, w_b) = (if trail_a != 0 { w_a + 1 } else { w_a }, if trail_b != 0 { w_b + 1 } else { w_b });
+
+			if w_a > 0 && w_b > 0 {
+				let (maskl_a, maskl_b) = (
+					1usize.wrapping_shl((size_usize - shift_a) as u32).wrapping_sub(1),
+					1usize.wrapping_shl((size_usize - shift_b) as u32).wrapping_sub(1));
+				let (maskr_a, maskr_b) = (
+					1usize.wrapping_shl((shift_a + trail_a) as u32).wrapping_sub(1),
+					1usize.wrapping_shl((shift_b + trail_b) as u32).wrapping_sub(1));
+
+				let (rlast_a, rlast_b) = (w_a - 1, w_b - 1);
+				let w = aligned!(w; size_usize);
+
+				let get_block = |r: usize, channel: &AlphaChannel, row: usize, rlast: usize, shift: usize, maskl: usize, maskr: usize| {
+					let i = row + r;
+
+					if r < rlast {
+						let result = (channel[i] >> shift) | ((channel[i + 1] & maskl) << shift);
+
+						if r == rlast - 1 {
+							return result & maskr;
+						}
+						return result;
+					}
+					channel[i] & maskr
+				};
+				for c in 0..h {
+					let (row_a, row_b) = ((y_a + c) * channel_a.stride() + x_a, (y_b + c) * channel_b.stride() + x_b);
+
 					for r in 0..w {
-						let (mut block_a, mut block_b) = (channel_a[row_a + r], channel_b[row_b + r]);
+						let (block_a, block_b) = (
+							get_block(r, channel_a, row_a, rlast_a, shift_a, maskl_a, maskr_a),
+							get_block(r, channel_b, row_b, rlast_b, shift_b, maskl_b, maskr_b));
 
-						if r == 0 {
-							block_a &= maskl_a;
-							block_b &= maskl_b;
-						}
-						if r == rlast {
-							block_a &= maskr_a;
-							block_b &= maskr_b;
-						}
 						if block_a != 0 && block_b != 0 {
 							return true;
 						}
-					}
-				} else {
-					if ((channel_a[row_a] >> shift_a) & 1 != 0) && ((channel_b[row_b] >> shift_b) & 1 != 0) {
-						return true;
 					}
 				}
 			}
@@ -192,46 +197,37 @@ impl Collide for AlphaChannel {
 impl BoxCollide for AlphaChannel {
 
 	fn collide(channel: &AlphaChannel, x: f64, y: f64, roi: Rectangle) -> bool {
-		let roi = Rectangle {
-			x: roi.x - x,
-			y: roi.y - y,
-			..roi
-		};
-		let size_usize = ::std::mem::size_of::<usize>() * 8;
-
-		let (x, y) = (roi.x.round() as usize, roi.y.round() as usize);
-		let (w, h) = (aligned!(roi.w.round() as usize; size_usize), roi.h.round() as usize);
+		let (w, h) = (roi.w.round() as usize, roi.h.round() as usize);
 
 		if w > 0 {
-			let shift = x % size_usize;
-			let maskl = (2usize << shift).wrapping_sub(1);
-			let maskr = ::std::usize::MAX << shift;
+			let (x, y) = ((roi.x - x).round() as usize, (roi.y - y).round() as usize);
+			
+			let xlast = x + w;
+
+			let size_usize = ::std::mem::size_of::<usize>() * 8;
+			let maskl = ::std::usize::MAX << (x % size_usize);
+			let maskr = !::std::usize::MAX.wrapping_shl((xlast % size_usize + 1) as u32);
 
 			let x = x / size_usize;
-			let rlast = w - 1;
+			let w = xlast / size_usize - x + 1;
 
-			for c in 0..h {
-				let row = (c + y) * channel.stride() + x;
+			if w > 0 {
+				let rlast = w - 1;
 
-				if w > 1 {
+				for c in 0..h {
+					let row = (c + y) * channel.stride() + x;
+
 					for r in 0..w {
 						let mut block = channel[row + r];
 
-						if r == 0 {
-							block &= maskl;
-						}
-						if r == rlast {
-							block &= maskr;
-						}
+						if r == 0 { block &= maskl; }
+						if r == rlast { block &= maskr; }
+
 						if block != 0 {
 							return true;
 						}
-					}					
-				} else {
-					if (channel[row] >> shift) & 1 != 0 {
-						return true;
-					}
-				}
+					}			
+				}			
 			}			
 		}
 		false
