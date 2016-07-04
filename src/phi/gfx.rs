@@ -10,7 +10,7 @@ use sdl2_image::LoadTexture;
 use self::sdl2_sys::pixels as ll;
 
 use std::cell::RefCell;
-use std::ops::Index;
+use std::ops::{ Index, Range };
 use std::path::Path;
 use std::rc::Rc;
 
@@ -22,7 +22,7 @@ macro_rules! aligned (
 );
 
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AlphaChannel {
 	data: Vec<usize>,
 
@@ -132,6 +132,14 @@ impl Index<usize> for AlphaChannel {
 	}
 }
 
+impl Index<Range<usize>> for AlphaChannel {
+	type Output = [usize];
+
+	fn index<'a>(&'a self, _index: Range<usize>) -> &'a [usize] {
+		&self.data[_index]
+	}
+}
+
 impl Collide for AlphaChannel {
 
 	fn collide(channel_a: &AlphaChannel, x_a: f64, y_a: f64, channel_b: &AlphaChannel, x_b: f64, y_b: f64, roi: Rectangle) -> bool {
@@ -140,52 +148,45 @@ impl Collide for AlphaChannel {
 		if w > 0 {
 			let (x_a, x_b) = ((roi.x - x_a).round() as usize, (roi.x - x_b).round() as usize);
 			let (y_a, y_b) = ((roi.y - y_a).round() as usize, (roi.y - y_b).round() as usize);
-
-			let (xlast_a, xlast_b) = (x_a + w, x_b + w);
+			let (xlast_a, xlast_b) = (x_a + w - 1, x_b + w - 1);
 
 			let size_usize = ::std::mem::size_of::<usize>() * 8;
-			let (shift_a, x_a) = (x_a % size_usize, x_a / size_usize);
-			let (shift_b, x_b) = (x_b % size_usize, x_b / size_usize);
-			let (trail_a, w_a) = (xlast_a % size_usize, xlast_a / size_usize - x_a);
-			let (trail_b, w_b) = (xlast_b % size_usize, xlast_b / size_usize - x_b);
 
-			let (w_a, w_b) = (if trail_a != 0 { w_a + 1 } else { w_a }, if trail_b != 0 { w_b + 1 } else { w_b });
+			let (maskl_a, maskl_b) = (
+				::std::usize::MAX.wrapping_shl((x_a % size_usize) as u32),
+				::std::usize::MAX.wrapping_shl((x_b % size_usize) as u32));			
+			let (maskr_a, maskr_b) = (
+				1usize.wrapping_shl((xlast_a % size_usize) as u32).wrapping_sub(1),
+				1usize.wrapping_shl((xlast_b % size_usize) as u32).wrapping_sub(1));
 
-			if w_a > 0 && w_b > 0 {
-				let (maskl_a, maskl_b) = (
-					1usize.wrapping_shl((size_usize - shift_a) as u32).wrapping_sub(1),
-					1usize.wrapping_shl((size_usize - shift_b) as u32).wrapping_sub(1));
-				let (maskr_a, maskr_b) = (
-					1usize.wrapping_shl((shift_a + trail_a) as u32).wrapping_sub(1),
-					1usize.wrapping_shl((shift_b + trail_b) as u32).wrapping_sub(1));
+			let w = aligned!(w; size_usize);
+			let (x_a, x_b) = (x_a / size_usize, x_b / size_usize);
+			let (w_a, w_b) = (
+				xlast_a / size_usize - x_a, 
+				xlast_b / size_usize - x_b);
 
-				let (rlast_a, rlast_b) = (w_a - 1, w_b - 1);
-				let w = aligned!(w; size_usize);
+			let get_block = |r: usize, channel: &AlphaChannel, offset: usize, last: usize, maskl: usize, maskr: usize| {
+				let i = offset + r;
+				let mut result = channel[i];
 
-				let get_block = |r: usize, channel: &AlphaChannel, row: usize, rlast: usize, shift: usize, maskl: usize, maskr: usize| {
-					let i = row + r;
+				if r <= 0 {
+					result &= maskl;
+				}
+				if r >= last {
+					result &= maskr;
+				}
+				return result;
+			};
+			for r in 0..h {
+				let (row_a, row_b) = ((y_a + r) * channel_a.stride() + x_a, (y_b + r) * channel_b.stride() + x_b);
 
-					if r < rlast {
-						let result = (channel[i] >> shift) | ((channel[i + 1] & maskl) << shift);
+				for c in 0..w {
+					let (block_a, block_b) = (
+						get_block(c, channel_a, row_a, w_a, maskl_a, maskr_a),
+						get_block(c, channel_b, row_b, w_b, maskl_b, maskr_b));
 
-						if r == rlast - 1 {
-							return result & maskr;
-						}
-						return result;
-					}
-					channel[i] & maskr
-				};
-				for c in 0..h {
-					let (row_a, row_b) = ((y_a + c) * channel_a.stride() + x_a, (y_b + c) * channel_b.stride() + x_b);
-
-					for r in 0..w {
-						let (block_a, block_b) = (
-							get_block(r, channel_a, row_a, rlast_a, shift_a, maskl_a, maskr_a),
-							get_block(r, channel_b, row_b, rlast_b, shift_b, maskl_b, maskr_b));
-
-						if block_a != 0 && block_b != 0 {
-							return true;
-						}
+					if (block_a & block_b) != 0 {
+						return true;
 					}
 				}
 			}

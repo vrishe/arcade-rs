@@ -102,23 +102,22 @@ impl Asteroid {
 		let surface_reader = RWops::from_file("assets/asteroid.png", "rb").unwrap();
 		let surface = surface_reader.load().unwrap();
 
+		let alpha = unsafe { AlphaChannel::from_surface(&surface, Some(127u8)).unwrap() };
 		let spritesheet = Sprite::from_surface(&phi.renderer, &surface).unwrap();
 
-		unsafe {
-			AsteroidFactory {
-				alpha: Rc::new(AlphaChannel::from_surface(&surface, Some(127u8)).unwrap()),
-				sprite: AnimatedSprite::new(
-					AnimatedSprite::load_frames(
-						&spritesheet, 
-						AnimatedSpriteDescr {
-							total_frames: ASTEROIDS_TOTAL,
-							frames_high: ASTEROIDS_HIGH,
-							frames_wide: ASTEROIDS_WIDE,
-							frame_w: ASTEROID_SIDE,
-							frame_h: ASTEROID_SIDE,
-						}),
-					0.0),
-			}
+		AsteroidFactory {
+			alpha: Rc::new(alpha),
+			sprite: AnimatedSprite::new(
+				AnimatedSprite::load_frames(
+					&spritesheet, 
+					AnimatedSpriteDescr {
+						total_frames: ASTEROIDS_TOTAL,
+						frames_high: ASTEROIDS_HIGH,
+						frames_wide: ASTEROIDS_WIDE,
+						frame_w: ASTEROID_SIDE,
+						frame_h: ASTEROID_SIDE,
+					}),
+				0.0),
 		}
 	}
 
@@ -270,6 +269,7 @@ impl Player {
 		let surface_reader = RWops::from_file("assets/spaceship2.png", "rb").unwrap();
 		let surface = surface_reader.load().unwrap();
 
+		let alpha = unsafe { AlphaChannel::from_surface(&surface, Some(200u8)).unwrap() };
 		let spritesheet = Sprite::from_surface(&phi.renderer, &surface).unwrap();
 		//? When we know in advance how many elements the `Vec` we contain, we
 		//? can allocate the good amount of data up-front.
@@ -289,23 +289,21 @@ impl Player {
 				}).unwrap());
 			}
 		}
-		unsafe {
-			Player {
-				rect: Rectangle {
-					x: 64.0,
-					y: 64.0,
-					w: PLAYER_W,
-					h: PLAYER_H,
-				},
-				sprites: sprites,
+		Player {
+			rect: Rectangle {
+				x: 64.0,
+				y: 64.0,
+				w: PLAYER_W,
+				h: PLAYER_H,
+			},
+			sprites: sprites,
 
-				alpha: AlphaChannel::from_surface(&surface, Some(127u8)).unwrap(),
+			alpha: alpha,
 
-				//? Let `RectBullet` be the default kind of bullet.
-				cannon: CannonType::RectBullet,
-				current: PlayerFrame::MidNorm,
-			}
-		}	
+			//? Let `RectBullet` be the default kind of bullet.
+			cannon: CannonType::RectBullet,
+			current: PlayerFrame::MidNorm,
+		}
 	}
 
 
@@ -397,7 +395,7 @@ impl Player {
 	pub fn render(&self, phi: &mut Phi) {
 		// Render the bounding box (for debugging purposes)
 		if DEBUG {
-			phi.renderer.set_draw_color(Color::RGB(200, 200, 50));
+			phi.renderer.set_draw_color(Color::RGB(10, 200, 50));
 			phi.renderer.fill_rect(self.rect.to_sdl().unwrap()).unwrap();
 		}
 
