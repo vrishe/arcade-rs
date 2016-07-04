@@ -102,7 +102,7 @@ impl Asteroid {
 		let surface_reader = RWops::from_file("assets/asteroid.png", "rb").unwrap();
 		let surface = surface_reader.load().unwrap();
 
-		let alpha = unsafe { AlphaChannel::from_surface(&surface, Some(127u8)).unwrap() };
+		let alpha = unsafe { AlphaChannel::from_surface(&surface, Some(0.5)).unwrap() };
 		let spritesheet = Sprite::from_surface(&phi.renderer, &surface).unwrap();
 
 		AsteroidFactory {
@@ -269,7 +269,7 @@ impl Player {
 		let surface_reader = RWops::from_file("assets/spaceship2.png", "rb").unwrap();
 		let surface = surface_reader.load().unwrap();
 
-		let alpha = unsafe { AlphaChannel::from_surface(&surface, Some(200u8)).unwrap() };
+		let alpha = unsafe { AlphaChannel::from_surface(&surface, Some(0.25)).unwrap() };
 		let spritesheet = Sprite::from_surface(&phi.renderer, &surface).unwrap();
 		//? When we know in advance how many elements the `Vec` we contain, we
 		//? can allocate the good amount of data up-front.
@@ -289,6 +289,8 @@ impl Player {
 				}).unwrap());
 			}
 		}
+		println!("{:?}", alpha);
+
 		Player {
 			rect: Rectangle {
 				x: 64.0,

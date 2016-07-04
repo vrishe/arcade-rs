@@ -42,7 +42,7 @@ pub trait BoxCollide {
 
 impl AlphaChannel {
 
-	pub unsafe fn from_surface(surface: &Surface, threshold: Option<u8>) -> Option<AlphaChannel> {
+	pub unsafe fn from_surface(surface: &Surface, threshold: Option<f64>) -> Option<AlphaChannel> {
 		let pixel_format = surface.pixel_format().raw();
 
 		match (*pixel_format).format {
@@ -51,18 +51,31 @@ impl AlphaChannel {
 			ll::SDL_PIXELFORMAT_ARGB8888 | ll::SDL_PIXELFORMAT_RGBA8888 | ll::SDL_PIXELFORMAT_ABGR8888 | ll::SDL_PIXELFORMAT_BGRA8888 |
 			ll::SDL_PIXELFORMAT_ARGB2101010 => {
 
-				let threshold = threshold.unwrap_or(255u8);
-				let read_alpha: Box<Fn(*const u8) -> u8> = match (*pixel_format).format {
-					ll::SDL_PIXELFORMAT_ARGB4444 | ll::SDL_PIXELFORMAT_RGBA4444 | ll::SDL_PIXELFORMAT_ABGR4444 | ll::SDL_PIXELFORMAT_BGRA4444 | 
-					ll::SDL_PIXELFORMAT_ARGB1555 | ll::SDL_PIXELFORMAT_RGBA5551 | ll::SDL_PIXELFORMAT_ABGR1555 | ll::SDL_PIXELFORMAT_BGRA5551 => {
+				let threshold = threshold.unwrap_or(1.0) as f32;
+				let read_alpha: Box<Fn(*const u8) -> f32> = match (*pixel_format).format {
+					ll::SDL_PIXELFORMAT_ARGB4444 | ll::SDL_PIXELFORMAT_ABGR4444 => {
 						Box::new(|pixels: *const u8| {
-							((*(pixels as *const u16) >> (*pixel_format).Ashift) << (*pixel_format).Aloss) as u8
+							(*(pixels as *const u16) >> 12) as f32 / 15.0
 						})
 					},
-					ll::SDL_PIXELFORMAT_ARGB8888 | ll::SDL_PIXELFORMAT_RGBA8888 | ll::SDL_PIXELFORMAT_ABGR8888 | ll::SDL_PIXELFORMAT_BGRA8888 |
+					ll::SDL_PIXELFORMAT_RGBA4444 | ll::SDL_PIXELFORMAT_BGRA4444 => {
+						Box::new(|pixels: *const u8| {
+							(*(pixels as *const u16) & 0x0fu16) as f32 / 15.0
+						})
+					},
+					ll::SDL_PIXELFORMAT_ARGB8888 | ll::SDL_PIXELFORMAT_ABGR8888 => {
+						Box::new(|pixels: *const u8| { 
+							(*(pixels as *const u32) >> 24) as f32 / 255.0
+						})
+					}, 
+					ll::SDL_PIXELFORMAT_RGBA8888 | ll::SDL_PIXELFORMAT_BGRA8888 => {
+						Box::new(|pixels: *const u8| { 
+							(*(pixels as *const u32) & 0xffu32) as f32 / 255.0
+						})
+					},
 					ll::SDL_PIXELFORMAT_ARGB2101010 => {
 						Box::new(|pixels: *const u8| { 
-							((*(pixels as *const u32) >> (*pixel_format).Ashift) << (*pixel_format).Aloss) as u8
+							(*(pixels as *const u32) >> 30u32) as f32 / 3.0
 						})
 					},
 					_ => unreachable!()
@@ -159,12 +172,12 @@ impl Collide for AlphaChannel {
 				1usize.wrapping_shl((xlast_a % size_usize) as u32).wrapping_sub(1),
 				1usize.wrapping_shl((xlast_b % size_usize) as u32).wrapping_sub(1));
 
-			let w = aligned!(w; size_usize);
 			let (x_a, x_b) = (x_a / size_usize, x_b / size_usize);
 			let (w_a, w_b) = (
 				xlast_a / size_usize - x_a, 
 				xlast_b / size_usize - x_b);
 
+			let w = ::std::cmp::min(w_a, w_b) + 1;
 			let get_block = |r: usize, channel: &AlphaChannel, offset: usize, last: usize, maskl: usize, maskr: usize| {
 				let i = offset + r;
 				let mut result = channel[i];
