@@ -1,4 +1,7 @@
+extern crate crc;
 extern crate sdl2_sys;
+
+use self::crc::{crc32, Hasher32};
 
 use phi::data::Rectangle;
 use phi::Phi;
@@ -9,8 +12,11 @@ use sdl2_image::LoadTexture;
 
 use self::sdl2_sys::pixels as ll;
 
+use std::*;
 use std::cell::RefCell;
-use std::ops::{ Index, Range };
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Read, Write};
+use std::ops::{Index, Range};
 use std::path::Path;
 use std::rc::Rc;
 
@@ -39,6 +45,9 @@ pub trait Collide {
 pub trait BoxCollide {
 	fn collide(channel: &AlphaChannel, x: f64, y: f64, roi: Rectangle) -> bool;	
 }
+
+
+const BYTE_ORDER_MARK: u16 = 0xbeef;
 
 impl AlphaChannel {
 
@@ -81,7 +90,7 @@ impl AlphaChannel {
 					_ => unreachable!()
 				};
 				let read_pixels = |pixels: &[u8]| {
-					let size_usize = ::std::mem::size_of::<usize>() * 8; // bytes
+					let size_usize = ::std::mem::size_of::<usize>() * 8;
 					let size_packed = aligned!(surface.width() as usize; size_usize);
 
 					let mut result: Vec<usize> = vec![0; size_packed * surface.height() as usize];
@@ -118,6 +127,75 @@ impl AlphaChannel {
 			_ => None
 		}
 	}
+
+	pub fn from_file(path: &Path) -> Result<AlphaChannel, io::Error> {
+		let mut file = BufReader::new(try!(File::open(path)));
+		let size_usize = ::std::mem::size_of::<usize>();
+
+		let mut data_vector: Vec<u8> = vec![0; 32];
+		try!(file.read_exact(&mut data_vector));
+
+		unsafe {
+			let data_ptr = data_vector.as_ptr();
+
+			match *(data_ptr as *const u16) {
+				BYTE_ORDER_MARK => {
+					let checksum = *(data_ptr.offset(2) as *const u32);
+					let height = *(data_ptr.offset(6) as *const u32);
+					let width = *(data_ptr.offset(10) as *const u32);
+
+					let mut digest = crc32::Digest::new(crc32::IEEE);
+
+					data_vector.clear();
+					try!(file.read_to_end(&mut data_vector));
+
+					digest.write(data_vector.as_slice());
+					if digest.sum32() != checksum {
+						return Err(io::Error::new(io::ErrorKind::Other, "Can't read alpha channel from this file! (CHECKSUM)"));
+					}
+					let data = Vec::from_raw_parts(
+						data_vector.as_mut_ptr() as *mut usize, 
+						data_vector.len() / size_usize,
+						data_vector.capacity());
+
+					::std::mem::forget(data_vector);
+
+					Ok(AlphaChannel {
+						data: data,
+
+						stride: aligned!(width as usize; size_usize * 8),
+
+						height: height,
+						width: width,	
+					})
+				},
+				_ => Err(io::Error::new(io::ErrorKind::Other, "Can't read alpha channel from this file! (BYTE ORDER)"))
+			}			
+		}
+	}
+
+	pub fn save_to(&self, path: &Path) -> Result<(), io::Error> {
+		let mut file = BufWriter::new(try!(File::create(path)));
+		let size_usize = ::std::mem::size_of::<usize>();
+
+		unsafe {
+			let mut digest = crc32::Digest::new(crc32::IEEE);
+
+			let data_size = self.data.len() * size_usize;
+			let data_slice = ::std::slice::from_raw_parts(
+				self.data.as_ptr() as *const u8, data_size);
+
+			digest.write(data_slice);
+			try!(file.write_all(&::std::mem::transmute::<u16, [u8; 2]>(BYTE_ORDER_MARK)));
+			try!(file.write_all(&::std::mem::transmute::<u32, [u8; 4]>(digest.sum32())));
+			try!(file.write_all(&::std::mem::transmute::<u32, [u8; 4]>(self.height())));	
+			try!(file.write_all(&::std::mem::transmute::<u32, [u8; 4]>(self.width())));
+			try!(file.write_all(&::std::mem::transmute::<u64, [u8; 8]>(data_size as u64)));
+			try!(file.write_all(&vec![0u8; 10])); // padding
+			try!(file.write_all(data_slice));
+		}
+		Ok(())
+	}	
 
 
 	pub fn stride(&self) -> usize {

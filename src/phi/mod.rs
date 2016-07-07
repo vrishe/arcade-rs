@@ -139,7 +139,7 @@ pub trait View {
 
 /// Create a window with name `title`, initialize the underlying libraries and
 /// start the game with the `View` returned by `init()`.
-pub fn spawn<F>(title: &str, init: F) where F: Fn(&mut Phi) -> Box<View> {
+pub fn spawn<F>(title: &str, size: (u32, u32), init: F) where F: Fn(&mut Phi) -> Box<View> {
 	// Initialize SDL2
 	let sdl_context = ::sdl2::init().unwrap();
 	let video = sdl_context.video().unwrap();
@@ -161,7 +161,7 @@ pub fn spawn<F>(title: &str, init: F) where F: Fn(&mut Phi) -> Box<View> {
 	::sdl2_mixer::open_audio(44100, ::sdl2_mixer::AUDIO_S16LSB, 2, 1024).unwrap();
 
 	// Create the window
-	let window = video.window(title, 800, 600)
+	let window = video.window(title, size.0, size.1)
 	.position_centered()
 	.opengl()
 	// .resizable()

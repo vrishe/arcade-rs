@@ -36,12 +36,6 @@ const PLAYER_H: f64 = 64.0;
 const SHOT_DELAY: f64 = 1.0 / 7.62;
 
 
-#[cfg(feature="debug")]
-const DEBUG: bool = true;
-#[cfg(not(feature="debug"))]
-const DEBUG: bool= false;
-
-
 /// The different states our Player might be in. In the image, they're ordered
 /// from left to right, then from top to bottom.
 #[derive(Clone, Copy)]
@@ -86,6 +80,26 @@ trait GameBody {
 	}
 }
 
+fn load_spritesheet_with_alpha (phi: &Phi, path: &str, alpha_threshold: f64) -> Result<(AlphaChannel, Sprite), ::std::io::Error> {
+	let alpha_path = ::std::path::Path::new(path).with_extension("acl0");
+
+	match AlphaChannel::from_file(&alpha_path) {
+		Ok(alpha) => { 
+			Ok((alpha, Sprite::load(&phi.renderer, path).unwrap()))
+		},
+		_ => {
+			let surface_reader = RWops::from_file(path, "rb").unwrap();
+			let surface = surface_reader.load().unwrap();
+
+			let alpha = unsafe { AlphaChannel::from_surface(&surface, Some(alpha_threshold)).unwrap() };
+
+			try!(alpha.save_to(&alpha_path));
+
+			Ok((alpha, Sprite::from_surface(&phi.renderer, &surface).unwrap()))
+		}
+	}
+}
+
 
 // Data types
 struct Asteroid {
@@ -99,11 +113,7 @@ struct Asteroid {
 
 impl Asteroid {
 	fn factory(phi: &mut Phi) -> AsteroidFactory {
-		let surface_reader = RWops::from_file("assets/asteroid.png", "rb").unwrap();
-		let surface = surface_reader.load().unwrap();
-
-		let alpha = unsafe { AlphaChannel::from_surface(&surface, Some(0.5)).unwrap() };
-		let spritesheet = Sprite::from_surface(&phi.renderer, &surface).unwrap();
+		let (alpha, spritesheet) = load_spritesheet_with_alpha(phi, "assets/asteroid.png", 0.5).unwrap();
 
 		AsteroidFactory {
 			alpha: Rc::new(alpha),
@@ -132,7 +142,7 @@ impl Asteroid {
 	}
 
 	fn render(&self, phi: &mut Phi) {
-		if DEBUG {
+		if ::DEBUG {
 			// Render the bounding box
 			phi.renderer.set_draw_color(Color::RGB(200, 200, 50));
 			phi.renderer.fill_rect(self.rect.to_sdl().unwrap()).unwrap();
@@ -266,11 +276,7 @@ struct Player {
 
 impl Player {
 	pub fn new(phi: &mut Phi) -> Player {
-		let surface_reader = RWops::from_file("assets/spaceship2.png", "rb").unwrap();
-		let surface = surface_reader.load().unwrap();
-
-		let alpha = unsafe { AlphaChannel::from_surface(&surface, Some(0.25)).unwrap() };
-		let spritesheet = Sprite::from_surface(&phi.renderer, &surface).unwrap();
+		let (alpha, spritesheet) = load_spritesheet_with_alpha(phi, "assets/spaceship.png", 0.5).unwrap();
 		//? When we know in advance how many elements the `Vec` we contain, we
 		//? can allocate the good amount of data up-front.
 		let mut sprites = Vec::with_capacity(9);
@@ -289,8 +295,6 @@ impl Player {
 				}).unwrap());
 			}
 		}
-		println!("{:?}", alpha);
-
 		Player {
 			rect: Rectangle {
 				x: 64.0,
@@ -396,7 +400,7 @@ impl Player {
 
 	pub fn render(&self, phi: &mut Phi) {
 		// Render the bounding box (for debugging purposes)
-		if DEBUG {
+		if ::DEBUG {
 			phi.renderer.set_draw_color(Color::RGB(10, 200, 50));
 			phi.renderer.fill_rect(self.rect.to_sdl().unwrap()).unwrap();
 		}
@@ -444,7 +448,6 @@ pub struct GameView {
 
 impl GameView {
 	pub fn new (phi: &mut Phi) -> GameView {
-
 		GameView {
 			player: Player::new(phi),
 			shot_time: SHOT_DELAY,
@@ -479,23 +482,6 @@ impl View for GameView {
 		// with the way, how Rust handles runtime safety for references.
 		{
 			let game = &mut *self;
-
-			//? Upon assignment, the old value of `self.bullets`, namely the empty vector,
-			//? will be freed automatically, because its owner no longer refers to it.
-			//? We can then update the bullet quite simply.
-			game.bullets = ::std::mem::replace(&mut game.bullets, vec![]).into_iter()
-			.filter_map(|bullet| bullet.update(phi, elapsed))
-			.collect();
-
-			// Update the asteroids
-			game.asteroids = ::std::mem::replace(&mut game.asteroids, vec![]).into_iter()
-			.filter_map(|asteroid| asteroid.update(elapsed))
-			.collect();
-
-			// Update the explosions
-			game.explosions = ::std::mem::replace(&mut game.explosions, vec![]).into_iter()
-			.filter_map(|explosion| explosion.update(elapsed))
-			.collect();
 
 			//? We keep track of whether or not the player is alive.
 			let mut player_alive = true;
@@ -555,6 +541,23 @@ impl View for GameView {
 				println!("The player's Ship has been destroyed.");
 			}
 			game.player.update(phi, elapsed);
+
+			//? Upon assignment, the old value of `self.bullets`, namely the empty vector,
+			//? will be freed automatically, because its owner no longer refers to it.
+			//? We can then update the bullet quite simply.
+			game.bullets = ::std::mem::replace(&mut game.bullets, vec![]).into_iter()
+			.filter_map(|bullet| bullet.update(phi, elapsed))
+			.collect();
+
+			// Update the asteroids
+			game.asteroids = ::std::mem::replace(&mut game.asteroids, vec![]).into_iter()
+			.filter_map(|asteroid| asteroid.update(elapsed))
+			.collect();
+
+			// Update the explosions
+			game.explosions = ::std::mem::replace(&mut game.explosions, vec![]).into_iter()
+			.filter_map(|explosion| explosion.update(elapsed))
+			.collect();
 
 			// Allow the player to shoot after the bullets are updated, so that,
 			// when rendered for the first time, they are drawn wherever they
@@ -623,5 +626,60 @@ impl View for GameView {
 		}
 		// Render the foreground
 		self.bg_front.render(&mut phi.renderer);
+	}
+}
+
+
+#[cfg(test)]
+mod tests {
+	extern crate time;
+
+	use super::*;
+	use ::phi::{ Phi, View, ViewAction };
+	use self::time::{ PreciseTime, Duration };
+
+	struct EmptyView {
+
+	}
+
+	impl View for EmptyView {
+		fn update(mut self: Box<Self>, phi: &mut Phi, elapsed: f64) -> ViewAction {
+			ViewAction::Quit
+		}
+
+		fn render(&self, phi: &mut Phi) {
+			/* Nothing to do  */
+		}
+	}
+
+
+	fn measure<F>(mut action: F)  -> Duration where F: FnMut() -> () {
+		let start = PreciseTime::now();
+		{
+			action();	
+		}
+		start.to(PreciseTime::now())
+	}
+
+
+	const GAME_VIEW_LOAD_REPEAT_COUNT: u32 = 1000;
+
+	#[test]
+	fn bench_game_view_load() {
+		::phi::spawn("testr", (1, 1), |phi| {
+			let mut duration_total = 0i64;
+
+			for i in 0..GAME_VIEW_LOAD_REPEAT_COUNT {
+				duration_total += measure(|| {
+					GameView::new(phi);
+				}).num_milliseconds();
+
+				::std::fs::remove_file("assets/asteroid.acl0");	
+				::std::fs::remove_file("assets/spaceship.acl0");
+			}
+			println!("GameView initialization takes {}ms in average.", duration_total / GAME_VIEW_LOAD_REPEAT_COUNT as i64);
+
+			Box::new(EmptyView {})
+		});
 	}
 }
