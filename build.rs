@@ -39,6 +39,9 @@ fn copy(from: &Path, to: &Path, extension: Option<&str>) {
 				_ => {}
 			}
 		}
+		else if entry.path().is_dir() {
+			copy(entry.path().as_path(), to.join(entry.path().file_name().unwrap()).as_path(), extension);
+		}
 	}
 }
 

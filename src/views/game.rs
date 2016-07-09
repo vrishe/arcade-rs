@@ -1,7 +1,7 @@
 extern crate rand;
 
-use phi::{Phi, View, ViewAction};
-use phi::data::{Rectangle, MaybeAlive};
+use phi::{Phi, RendererExtensions, View, ViewAction};
+use phi::data::{MaybeAlive, Rectangle};
 use phi::gfx::{AlphaChannel, AnimatedSprite, AnimatedSpriteDescr, Collide, BoxCollide, Renderable, Sprite};
 
 use sdl2::pixels::Color;
@@ -29,6 +29,10 @@ const EXPLOSION_SIDE: f64 = 96.0;
 const EXPLOSION_FPS: f64 = 16.0;
 const EXPLOSION_DURATION: f64 = 1.0 / EXPLOSION_FPS * EXPLOSIONS_TOTAL as f64;
 
+const BLAST_RADIUS_MAX: f64 = EXPLOSION_SIDE * 0.558;
+const BLAST_RADIUS_MIN: f64 = EXPLOSION_SIDE * 0.338;
+const BLAST_DURATION: f64 = EXPLOSION_DURATION / 8.76;
+
 const PLAYER_SPEED: f64 = 180.0;
 const PLAYER_W: f64 = 64.0;
 const PLAYER_H: f64 = 64.0;
@@ -52,7 +56,7 @@ enum PlayerFrame {
 }
 
 
-trait GameBody {
+trait CollisionBody {
 
 	fn rect(&self) -> &Rectangle; 
 
@@ -60,7 +64,7 @@ trait GameBody {
 
 	fn alpha(&self) -> &AlphaChannel; 
 
-	fn collide(&self, another: &GameBody) -> bool {
+	fn collide(&self, another: &CollisionBody) -> bool {
 		Rectangle::intersection(self.rect(), another.rect())
 		.map_or(false, |intersection| {
 			let (self_frame, another_frame) = (self.frame(), another.frame());
@@ -113,7 +117,7 @@ struct Asteroid {
 
 impl Asteroid {
 	fn factory(phi: &mut Phi) -> AsteroidFactory {
-		let (alpha, spritesheet) = load_spritesheet_with_alpha(phi, "assets/asteroid.png", 0.5).unwrap();
+		let (alpha, spritesheet) = load_spritesheet_with_alpha(phi, "assets/sprites/asteroid.png", 0.5).unwrap();
 
 		AsteroidFactory {
 			alpha: Rc::new(alpha),
@@ -151,7 +155,7 @@ impl Asteroid {
 	}
 }
 
-impl<'a> GameBody for Asteroid {
+impl<'a> CollisionBody for Asteroid {
 	fn rect(&self) -> &Rectangle {
 		&self.rect
 	}
@@ -207,20 +211,21 @@ struct Explosion {
 	//? Keep how long its been arrived, so that we destroy the explosion once
 	//? its animation is finished.
 	alive_since: f64,
+	blast_radius: f64,
 }
 
 impl Explosion {
 	fn factory(phi: &mut Phi) -> ExplosionFactory {
 		ExplosionFactory {
 			sprite: AnimatedSprite::load_with_fps(
-				"assets/explosion.png", 
-				phi, AnimatedSpriteDescr {
+				"assets/sprites/explosion.png", phi,
+				AnimatedSpriteDescr {
 					total_frames: EXPLOSIONS_TOTAL,
 					frames_high: EXPLOSIONS_HIGH,
 					frames_wide: EXPLOSIONS_WIDE,
 					frame_w: EXPLOSION_SIDE,
 					frame_h: EXPLOSION_SIDE,
-				}, 
+				},
 				EXPLOSION_FPS),
 		}
 	}
@@ -230,13 +235,41 @@ impl Explosion {
 		self.sprite.add_time(dt);
 
 		if self.alive_since < EXPLOSION_DURATION {
+			if self.alive_since < BLAST_DURATION {
+				let t = self.alive_since / BLAST_DURATION;
+				let value = BLAST_RADIUS_MAX - (BLAST_RADIUS_MAX - BLAST_RADIUS_MIN) * (t * t * t * t * t);
+
+				self.blast_radius = value * value;
+			} else {
+				self.blast_radius = -1.0;
+			}
 			return Some(self);
 		}
 		None
 	}
 
 	fn render(&self, phi: &mut Phi) {
+		// Render the bounding box (for debugging purposes)
+		if ::DEBUG {
+			if self.blast_radius > 0.0 {
+				let center = self.rect.center();
+
+				phi.renderer.set_draw_color(Color::RGB(200, 50, 10));
+				phi.renderer.fill_circle(center.0, center.1, self.blast_radius.sqrt()).unwrap();				
+			}
+		}
 		self.sprite.render(&mut phi.renderer, self.rect);
+	}
+
+
+	fn blast(&self, location: (f64, f64)) -> bool {
+		if self.blast_radius >= 0.0 {
+			let center = self.rect.center();
+			let vector = (location.0 - center.0, location.1 - center.1);
+
+			return vector.0 * vector.0 + vector.1 * vector.1 <= self.blast_radius;			
+		}
+		false
 	}
 }
 
@@ -259,6 +292,7 @@ impl ExplosionFactory {
 			.center_at(center),
 
 			alive_since: 0.0,
+			blast_radius: -1.0,
 		}
 	}
 }
@@ -276,7 +310,7 @@ struct Player {
 
 impl Player {
 	pub fn new(phi: &mut Phi) -> Player {
-		let (alpha, spritesheet) = load_spritesheet_with_alpha(phi, "assets/spaceship.png", 0.5).unwrap();
+		let (alpha, spritesheet) = load_spritesheet_with_alpha(phi, "assets/sprites/spaceship.png", 0.5).unwrap();
 		//? When we know in advance how many elements the `Vec` we contain, we
 		//? can allocate the good amount of data up-front.
 		let mut sprites = Vec::with_capacity(9);
@@ -411,7 +445,7 @@ impl Player {
 	}
 }
 
-impl GameBody for Player {
+impl CollisionBody for Player {
 	fn rect(&self) -> &Rectangle {
 		&self.rect
 	}
@@ -459,13 +493,13 @@ impl GameView {
 			bullets: vec![],
 			explosions: vec![],
 
-			bg_ambient: Background::load(&phi.renderer, "assets/starAMB.png", 0.0).unwrap(),
-			bg_back: Background::load(&phi.renderer, "assets/starBG.png", 20.0).unwrap(),
-			bg_middle: Background::load(&phi.renderer, "assets/starMG.png", 40.0).unwrap(),
-			bg_front: Background::load(&phi.renderer, "assets/starFG.png", 80.0).unwrap(),
+			bg_ambient: Background::load(&phi.renderer, "assets/backgrounds/starAMB.png", 0.0).unwrap(),
+			bg_back: Background::load(&phi.renderer, "assets/backgrounds/starBG.png", 20.0).unwrap(),
+			bg_middle: Background::load(&phi.renderer, "assets/backgrounds/starMG.png", 40.0).unwrap(),
+			bg_front: Background::load(&phi.renderer, "assets/backgrounds/starFG.png", 80.0).unwrap(),
 
-			bullet_sound: Chunk::from_file(Path::new("assets/bullet.ogg")).unwrap(),
-			explosion_sound: Chunk::from_file(Path::new("assets/explosion.ogg")).unwrap()
+			bullet_sound: Chunk::from_file(Path::new("assets/sounds/bullet.ogg")).unwrap(),
+			explosion_sound: Chunk::from_file(Path::new("assets/sounds/explosion.ogg")).unwrap()
 		}
 	}
 }
@@ -516,7 +550,7 @@ impl View for GameView {
 				//? Then, we use the magic of `filter_map` to keep only the asteroids
 				//? that didn't explode.
 				if asteroid_alive {
-					return Some(asteroid)
+					return asteroid.update(elapsed);
 				}
 				game.explosions.push(
 					game.explosion_factory.at_center(
@@ -528,12 +562,6 @@ impl View for GameView {
 			})
 			.collect();
 
-			//? Finally, we use once again the magic of `filter_map` to keep only the
-			//? bullets that are still alive.
-			game.bullets = transition_bullets.into_iter()
-			.filter_map(MaybeAlive::as_option)
-			.collect();
-
 			// TODO
 			// For the moment, we won't do anything about the player dying. This will be
 			// the subject of a future episode.
@@ -542,21 +570,30 @@ impl View for GameView {
 			}
 			game.player.update(phi, elapsed);
 
-			//? Upon assignment, the old value of `self.bullets`, namely the empty vector,
-			//? will be freed automatically, because its owner no longer refers to it.
-			//? We can then update the bullet quite simply.
-			game.bullets = ::std::mem::replace(&mut game.bullets, vec![]).into_iter()
-			.filter_map(|bullet| bullet.update(phi, elapsed))
-			.collect();
-
-			// Update the asteroids
-			game.asteroids = ::std::mem::replace(&mut game.asteroids, vec![]).into_iter()
-			.filter_map(|asteroid| asteroid.update(elapsed))
-			.collect();
-
 			// Update the explosions
 			game.explosions = ::std::mem::replace(&mut game.explosions, vec![]).into_iter()
 			.filter_map(|explosion| explosion.update(elapsed))
+			.collect();
+
+			//? Upon assignment, the old value of `self.bullets`, namely the empty vector,
+			//? will be freed automatically, because its owner no longer refers to it.
+			//? We can then update the bullet quite simply.
+			game.bullets = transition_bullets.into_iter()
+			.filter_map(|transition_bullet| {
+				match transition_bullet.as_option() {
+					Some(bullet) => {
+						let center = bullet.rect().center();
+
+						for explosion in &game.explosions {
+							if explosion.blast(center) {
+								return None;
+							}
+						}
+						bullet.update(phi, elapsed)
+					}
+					_ => None
+				}
+			})
 			.collect();
 
 			// Allow the player to shoot after the bullets are updated, so that,
@@ -674,8 +711,8 @@ mod tests {
 					GameView::new(phi);
 				}).num_milliseconds();
 
-				::std::fs::remove_file("assets/asteroid.acl0");	
-				::std::fs::remove_file("assets/spaceship.acl0");
+				::std::fs::remove_file("assets/sprites/asteroid.acl0");	
+				::std::fs::remove_file("assets/sprites/spaceship.acl0");
 			}
 			println!("GameView initialization takes {}ms in average.", duration_total / GAME_VIEW_LOAD_REPEAT_COUNT as i64);
 

@@ -115,10 +115,43 @@ impl <'window> Phi<'window> {
 
 				self.play_sound(sound);
 			},
-
-		_ => { /* Everything's Alright! */ }
+			_ => { /* Everything's Alright! */ }
+		}
 	}
 }
+
+pub trait RendererExtensions {
+	fn fill_circle(self: &mut Self, x: f64, y:f64, radius: f64) -> Result<(), String>;
+}
+
+impl <'window> RendererExtensions for Renderer<'window> {
+	fn fill_circle(self: &mut Self, x: f64, y:f64, radius: f64) -> Result<(), String> {
+		use sdl2::rect::Point as SdlPoint;
+
+		let (mut e, mut a, mut b) = (0.0, radius, 0.0);
+
+		while a >= b {
+			let points = [
+				SdlPoint::new((x + a) as i32, (y + b) as i32),
+				SdlPoint::new((x + b) as i32, (y + a) as i32),
+				SdlPoint::new((x - b) as i32, (y + a) as i32),
+				SdlPoint::new((x - a) as i32, (y + b) as i32),
+				SdlPoint::new((x - a) as i32, (y - b) as i32),
+				SdlPoint::new((x - b) as i32, (y - a) as i32),
+				SdlPoint::new((x + b) as i32, (y - a) as i32),
+				SdlPoint::new((x + a) as i32, (y - b) as i32),
+			];
+			try!(self.draw_points(&points));
+
+			b += 1.0;
+			e += 1.0 + 2.0 * b;
+			if 2.0 * (e - a) + 1.0 > 0.0 {
+				a -= 1.0;
+				e += 1.0 - 2.0 * a;
+			}
+		}
+		Ok(())
+	}
 }
 
 

@@ -436,10 +436,10 @@ pub struct AnimatedSpriteDescr {
 
 impl AnimatedSprite {	
 	/// Creates a new animated sprite initialized at time 0.
-	pub fn new(sprites: Vec<Sprite>, frame_delay: f64) -> AnimatedSprite {
+	pub fn new(sprites: Vec<Sprite>, fps: f64) -> AnimatedSprite {
 		AnimatedSprite {
 			sprites: Rc::new(sprites),
-			frame_delay: frame_delay,
+			frame_delay: 1f64 / fps,
 			current_time: 0.0,
 			current_frame: 0,
 		}
@@ -457,7 +457,7 @@ impl AnimatedSprite {
 		}
 		let spritesheet = Sprite::load(&mut phi.renderer, path).unwrap();
 
-		AnimatedSprite::new(Self::load_frames(&spritesheet, descr), 1f64 / fps)
+		AnimatedSprite::new(Self::load_frames(&spritesheet, descr), fps)
 	}
 
 

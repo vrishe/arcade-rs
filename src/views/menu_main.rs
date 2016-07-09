@@ -40,11 +40,11 @@ impl MainMenuView {
 
             time: 0.0,
             logo: Sprite::load(&mut phi.renderer, "assets/logo.png").unwrap(),
-            sprite: Sprite::load(&mut phi.renderer, "assets/starAMB.png").unwrap(),
-            bg_back: Background::load(&phi.renderer, "assets/starBG.png", 32.0).unwrap(),
+            sprite: Sprite::load(&mut phi.renderer, "assets/backgrounds/starAMB.png").unwrap(),
+            bg_back: Background::load(&phi.renderer, "assets/backgrounds/starBG.png", 32.0).unwrap(),
 
             music: Music::from_file(
-                ::std::path::Path::new("assets/mdk_phoenix_orchestral.ogg")).unwrap()
+                ::std::path::Path::new("assets/sounds/mdk_phoenix_orchestral.ogg")).unwrap()
         };
         result.music.play(-1).unwrap();
         result
@@ -172,8 +172,8 @@ impl Action {
     fn new(phi: &mut Phi, label: &'static str, func: Box<Fn(&mut Phi) -> ViewAction>) -> Action {
         Action {
             func: func,
-            idle_sprite: phi.ttf_str_sprite(label, "assets/BlackOpsOne-Regular.ttf", 34, Color::RGB(97, 132, 162)).unwrap(),
-            hover_sprite: phi.ttf_str_sprite(label, "assets/BlackOpsOne-Regular.ttf", 38, Color::RGB(255, 255, 0)).unwrap(),
+            idle_sprite: phi.ttf_str_sprite(label, "assets/fonts/BlackOpsOne-Regular.ttf", 34, Color::RGB(97, 132, 162)).unwrap(),
+            hover_sprite: phi.ttf_str_sprite(label, "assets/fonts/BlackOpsOne-Regular.ttf", 38, Color::RGB(255, 255, 0)).unwrap(),
         }
     }
 }
