@@ -6,14 +6,15 @@ pub mod data;
 pub mod gfx;
 
 
-use self::gfx::Sprite;
-
 use sdl2::pixels::Color;
 use sdl2::render::Renderer;
 use sdl2_ttf::{Sdl2TtfContext, Font};
 
 use std::collections::HashMap;
 use std::path::Path;
+
+
+use self::gfx::Sprite;
 
 
 struct_events!{

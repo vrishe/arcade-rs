@@ -1,7 +1,6 @@
 extern crate crc;
 extern crate sdl2_sys;
 
-use self::crc::{crc32, Hasher32};
 
 use phi::data::Rectangle;
 use phi::Phi;
@@ -10,8 +9,6 @@ use sdl2::render::{Renderer, Texture};
 use sdl2::surface::Surface;
 use sdl2_image::LoadTexture;
 
-use self::sdl2_sys::pixels as ll;
-
 use std::*;
 use std::cell::RefCell;
 use std::fs::File;
@@ -19,6 +16,10 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use std::ops::{Index, Range};
 use std::path::Path;
 use std::rc::Rc;
+
+
+use self::crc::{crc32, Hasher32};
+use self::sdl2_sys::pixels as ll;
 
 
 macro_rules! aligned (

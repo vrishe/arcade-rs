@@ -16,7 +16,7 @@ const DEBUG: bool= false;
 
 
 fn main() {
-	::phi::spawn("ArcadeRS Shooter", (800, 600), |phi| {
+	::phi::spawn("ArcadeRS", (800, 600), |phi| {
 		Box::new(::views::menu_main::MainMenuView::new(phi))
 	});
 }

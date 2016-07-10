@@ -98,19 +98,21 @@ impl View for MainMenuView {
         let (win_w, win_h) = phi.output_size();
         let size = self.sprite.size();
         // We determine the scale ratio of the window to the sprite.
-        let scale = (win_h / size.1) * ((self.time * 45e-4).sin() + 1.0);
+        let scale = ((win_h / size.1) * ((self.time * 45e-4).sin() + 1.0)) as f32;
 
         // We define a logical position as depending solely on the time and the
         // dimensions of the image, not on the screen's size.
-        let sprite_w = size.0 * scale;
-        let sprite_h = size.1 * scale;
+        let sprite_w = size.0;// * scale;
+        let sprite_h = size.1;// * scale;
 
+        (&mut phi.renderer).set_scale(scale, scale).unwrap();
         self.sprite.render(&mut phi.renderer, Rectangle {
             x: (win_w - sprite_w) * 0.5,
             y: (win_h - sprite_h) * 0.5,
             w: sprite_w,
             h: sprite_h,
         });
+        (&mut phi.renderer).set_scale(1f32, 1f32).unwrap();
         self.bg_back.render(&mut phi.renderer);
 
         let size = self.logo.size();
