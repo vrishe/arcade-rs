@@ -2,6 +2,7 @@ extern crate rand;
 
 
 mod asteroid;
+mod blast;
 mod bullet;
 mod explosion;
 mod player;
@@ -9,7 +10,7 @@ mod player;
 
 use phi::{Phi, View, ViewAction};
 use phi::data::{MaybeAlive, Rectangle};
-use phi::gfx::{AlphaChannel, Collide, BoxCollide, Renderable, Sprite};
+use phi::gfx::{AlphaChannel, Renderable, Sprite};
 
 use sdl2::pixels::Color;
 use sdl2::rwops::RWops;
@@ -22,6 +23,7 @@ use views::background::Background;
 
 
 use self::asteroid::{Asteroid, AsteroidFactory};
+use self::blast::Blast;
 use self::bullet::Bullet;
 use self::explosion::{Explosion, ExplosionFactory};
 use self::player::Player;
@@ -38,6 +40,7 @@ pub struct GameView {
 	explosion_factory: ExplosionFactory,
 
 	asteroids: Vec<Asteroid>,
+	blasts: Vec<Box<Blast>>,
 	bullets: Vec<Box<Bullet>>,
 	explosions: Vec<Explosion>,
 
@@ -60,6 +63,7 @@ impl GameView {
 			explosion_factory: Explosion::factory(phi),
 
 			asteroids: vec![],
+			blasts: vec![],
 			bullets: vec![],
 			explosions: vec![],
 
@@ -237,33 +241,38 @@ impl View for GameView {
 }
 
 
-trait CollisionBody {
+trait GameObject<T> {
 
-	fn rect(&self) -> &Rectangle; 
+	fn location(&self) -> (f64, f64);
 
-	fn frame(&self) -> Rectangle;
 
-	fn alpha(&self) -> &AlphaChannel; 
+	fn update(mut self: Box<Self>, context: &mut Phi, dt: f64) -> Option<Box<T>>;
 
-	fn collide(&self, another: &CollisionBody) -> bool {
-		Rectangle::intersection(self.rect(), another.rect())
+	fn render(&self, context: &mut Phi);
+}
+
+trait HitBox {
+
+	// Global CS
+	fn frame(&self) -> &Rectangle;
+
+	// Spritesheet-local CS
+	fn bounds(&self) -> &Rectangle;
+
+
+	fn collision_mask(&self) -> &AlphaChannel;
+
+	fn collides_with(&self, another: &HitBox) -> bool {
+		Rectangle::intersection(self.frame(), another.frame())
 		.map_or(false, |intersection| {
-			let (self_frame, another_frame) = (self.frame(), another.frame());
 
-			<AlphaChannel as Collide>::collide(self.alpha(), self.rect().x - self_frame.x, self.rect().y - self_frame.y, 
-				another.alpha(), another.rect().x - another_frame.x, another.rect().y - another_frame.y, intersection)
-		})
-	}
+			AlphaChannel::intersect(self.collision_mask(), self.frame().x - self.bounds().x, self.frame().y - self.bounds().y, 
+				another.collision_mask(), another.frame().x - another.bounds().x, another.frame().y - another.bounds().y, intersection)
 
-	fn overlap(&self, area: &Rectangle) -> bool {
-		Rectangle::intersection(self.rect(), area)
-		.map_or(false, |intersection| {
-			let self_frame = self.frame();
-
-			<AlphaChannel as BoxCollide>::collide(self.alpha(), self.rect().x - self_frame.x, self.rect().y - self_frame.y, intersection)
 		})
 	}
 }
+
 
 fn load_spritesheet_with_alpha (phi: &Phi, path: &str, alpha_threshold: f64) -> Result<(AlphaChannel, Sprite), ::std::io::Error> {
 	let alpha_path = ::std::path::Path::new(path).with_extension("acl0");

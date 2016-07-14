@@ -39,14 +39,6 @@ pub struct AlphaChannel {
 	width: u32,	
 }
 
-pub trait Collide {
-	fn collide(channel_a: &AlphaChannel, x_a: f64, y_a: f64, channel_b: &AlphaChannel, x_b: f64, y_b: f64, roi: Rectangle) -> bool;
-}
-
-pub trait BoxCollide {
-	fn collide(channel: &AlphaChannel, x: f64, y: f64, roi: Rectangle) -> bool;	
-}
-
 
 const BYTE_ORDER_MARK: u16 = 0xbeef;
 
@@ -175,6 +167,97 @@ impl AlphaChannel {
 		}
 	}
 
+
+	pub fn intersect(channel_a: &AlphaChannel, x_a: f64, y_a: f64, channel_b: &AlphaChannel, x_b: f64, y_b: f64, roi: Rectangle) -> bool {
+		let (w, h) = (roi.w.round() as usize, roi.h.round() as usize);
+
+		if w > 0 {
+			let (x_a, x_b) = ((roi.x - x_a).round() as usize, (roi.x - x_b).round() as usize);
+			let (y_a, y_b) = ((roi.y - y_a).round() as usize, (roi.y - y_b).round() as usize);
+			let (xlast_a, xlast_b) = (x_a + w - 1, x_b + w - 1);
+
+			let size_usize = ::std::mem::size_of::<usize>() * 8;
+
+			let (maskl_a, maskl_b) = (
+				::std::usize::MAX.wrapping_shl((x_a % size_usize) as u32),
+				::std::usize::MAX.wrapping_shl((x_b % size_usize) as u32));			
+			let (maskr_a, maskr_b) = (
+				1usize.wrapping_shl((xlast_a % size_usize) as u32).wrapping_sub(1),
+				1usize.wrapping_shl((xlast_b % size_usize) as u32).wrapping_sub(1));
+
+			let (x_a, x_b) = (x_a / size_usize, x_b / size_usize);
+			let (w_a, w_b) = (
+				xlast_a / size_usize - x_a, 
+				xlast_b / size_usize - x_b);
+
+			let w = ::std::cmp::min(w_a, w_b) + 1;
+			let get_block = |r: usize, channel: &AlphaChannel, offset: usize, last: usize, maskl: usize, maskr: usize| {
+				let i = offset + r;
+				let mut result = channel[i];
+
+				if r <= 0 {
+					result &= maskl;
+				}
+				if r >= last {
+					result &= maskr;
+				}
+				return result;
+			};
+			for r in 0..h {
+				let (row_a, row_b) = ((y_a + r) * channel_a.stride() + x_a, (y_b + r) * channel_b.stride() + x_b);
+
+				for c in 0..w {
+					let (block_a, block_b) = (
+						get_block(c, channel_a, row_a, w_a, maskl_a, maskr_a),
+						get_block(c, channel_b, row_b, w_b, maskl_b, maskr_b));
+
+					if (block_a & block_b) != 0 {
+						return true;
+					}
+				}
+			}
+		}
+		false
+	}
+
+	pub fn intersect_box(channel: &AlphaChannel, x: f64, y: f64, roi: Rectangle) -> bool {
+		let (w, h) = (roi.w.round() as usize, roi.h.round() as usize);
+
+		if w > 0 {
+			let (x, y) = ((roi.x - x).round() as usize, (roi.y - y).round() as usize);
+			
+			let xlast = x + w;
+
+			let size_usize = ::std::mem::size_of::<usize>() * 8;
+			let maskl = ::std::usize::MAX << (x % size_usize);
+			let maskr = !::std::usize::MAX.wrapping_shl((xlast % size_usize + 1) as u32);
+
+			let x = x / size_usize;
+			let w = xlast / size_usize - x + 1;
+
+			if w > 0 {
+				let rlast = w - 1;
+
+				for c in 0..h {
+					let row = (c + y) * channel.stride() + x;
+
+					for r in 0..w {
+						let mut block = channel[row + r];
+
+						if r == 0 { block &= maskl; }
+						if r == rlast { block &= maskr; }
+
+						if block != 0 {
+							return true;
+						}
+					}			
+				}			
+			}			
+		}
+		false
+	}
+
+
 	pub fn save_to(&self, path: &Path) -> Result<(), io::Error> {
 		let mut file = BufWriter::new(try!(File::create(path)));
 		let size_usize = ::std::mem::size_of::<usize>();
@@ -230,108 +313,6 @@ impl Index<Range<usize>> for AlphaChannel {
 	fn index<'a>(&'a self, _index: Range<usize>) -> &'a [usize] {
 		&self.data[_index]
 	}
-}
-
-impl Collide for AlphaChannel {
-
-	fn collide(channel_a: &AlphaChannel, x_a: f64, y_a: f64, channel_b: &AlphaChannel, x_b: f64, y_b: f64, roi: Rectangle) -> bool {
-		let (w, h) = (roi.w.round() as usize, roi.h.round() as usize);
-
-		if w > 0 {
-			let (x_a, x_b) = ((roi.x - x_a).round() as usize, (roi.x - x_b).round() as usize);
-			let (y_a, y_b) = ((roi.y - y_a).round() as usize, (roi.y - y_b).round() as usize);
-			let (xlast_a, xlast_b) = (x_a + w - 1, x_b + w - 1);
-
-			let size_usize = ::std::mem::size_of::<usize>() * 8;
-
-			let (maskl_a, maskl_b) = (
-				::std::usize::MAX.wrapping_shl((x_a % size_usize) as u32),
-				::std::usize::MAX.wrapping_shl((x_b % size_usize) as u32));			
-			let (maskr_a, maskr_b) = (
-				1usize.wrapping_shl((xlast_a % size_usize) as u32).wrapping_sub(1),
-				1usize.wrapping_shl((xlast_b % size_usize) as u32).wrapping_sub(1));
-
-			let (x_a, x_b) = (x_a / size_usize, x_b / size_usize);
-			let (w_a, w_b) = (
-				xlast_a / size_usize - x_a, 
-				xlast_b / size_usize - x_b);
-
-			let w = ::std::cmp::min(w_a, w_b) + 1;
-			let get_block = |r: usize, channel: &AlphaChannel, offset: usize, last: usize, maskl: usize, maskr: usize| {
-				let i = offset + r;
-				let mut result = channel[i];
-
-				if r <= 0 {
-					result &= maskl;
-				}
-				if r >= last {
-					result &= maskr;
-				}
-				return result;
-			};
-			for r in 0..h {
-				let (row_a, row_b) = ((y_a + r) * channel_a.stride() + x_a, (y_b + r) * channel_b.stride() + x_b);
-
-				for c in 0..w {
-					let (block_a, block_b) = (
-						get_block(c, channel_a, row_a, w_a, maskl_a, maskr_a),
-						get_block(c, channel_b, row_b, w_b, maskl_b, maskr_b));
-
-					if (block_a & block_b) != 0 {
-						return true;
-					}
-				}
-			}
-		}
-		false
-	}
-}
-
-impl BoxCollide for AlphaChannel {
-
-	fn collide(channel: &AlphaChannel, x: f64, y: f64, roi: Rectangle) -> bool {
-		let (w, h) = (roi.w.round() as usize, roi.h.round() as usize);
-
-		if w > 0 {
-			let (x, y) = ((roi.x - x).round() as usize, (roi.y - y).round() as usize);
-			
-			let xlast = x + w;
-
-			let size_usize = ::std::mem::size_of::<usize>() * 8;
-			let maskl = ::std::usize::MAX << (x % size_usize);
-			let maskr = !::std::usize::MAX.wrapping_shl((xlast % size_usize + 1) as u32);
-
-			let x = x / size_usize;
-			let w = xlast / size_usize - x + 1;
-
-			if w > 0 {
-				let rlast = w - 1;
-
-				for c in 0..h {
-					let row = (c + y) * channel.stride() + x;
-
-					for r in 0..w {
-						let mut block = channel[row + r];
-
-						if r == 0 { block &= maskl; }
-						if r == rlast { block &= maskr; }
-
-						if block != 0 {
-							return true;
-						}
-					}			
-				}			
-			}			
-		}
-		false
-	}
-}
-
-
-/// Common interface for rendering a graphical component to some given region
-/// of the window.
-pub trait Renderable {
-	fn render(&self, renderer: &mut Renderer, dest: Rectangle);
 }
 
 
@@ -400,8 +381,8 @@ impl Sprite {
 		(self.src.w, self.src.h)
 	}
 
-	pub fn frame(&self) -> Rectangle {
-		self.src
+	pub fn frame(&self) -> &Rectangle {
+		&self.src
 	}
 }
 
@@ -534,6 +515,12 @@ impl Renderable for AnimatedSprite {
 	}
 }
 
+
+/// Common interface for rendering a graphical component to some given region
+/// of the window.
+pub trait Renderable {
+	fn render(&self, renderer: &mut Renderer, dest: Rectangle);
+}
 
 pub trait CopySprite<T> {
 	fn copy_sprite(&mut self, sprite: &T, dest: Rectangle);

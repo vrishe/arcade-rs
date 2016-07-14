@@ -7,7 +7,7 @@ use sdl2::pixels::Color;
 use std::rc::Rc;
 
 
-use super::CollisionBody;
+use super::{GameObject, HitBox};
 
 
 const ASTEROIDS_WIDE: usize = 21;
@@ -22,12 +22,13 @@ pub struct Asteroid {
 
 	alpha: AlphaChannel,
 
-	vel: f64,
+	velocity: f64,
 }
 
 impl Asteroid {
-	pub fn factory(phi: &mut Phi) -> AsteroidFactory {
-		let (alpha, spritesheet) = super::load_spritesheet_with_alpha(phi, "assets/sprites/asteroid.png", 0.5).unwrap();
+
+	pub fn factory(context: &mut Phi) -> AsteroidFactory {
+		let (alpha, spritesheet) = super::load_spritesheet_with_alpha(context, "assets/sprites/asteroid.png", 0.5).unwrap();
 
 		AsteroidFactory {
 			alpha: Rc::new(alpha),
@@ -44,9 +45,16 @@ impl Asteroid {
 				0.0),
 		}
 	}
+}
 
-	pub fn update(mut self, dt: f64) -> Option<Asteroid> {
-		self.rect.x -= dt * self.vel;
+impl GameObject<Asteroid> for Asteroid {
+
+	fn location(&self) -> (f64, f64) {
+		self.rect.location()
+	}
+
+	fn update(mut self: Box<Asteroid>, context: &mut Phi, dt: f64) -> Option<Box<Asteroid>> {
+		self.rect.x -= dt * self.velocity;
 		self.sprite.add_time(dt);
 
 		if self.rect.x > -ASTEROID_SIDE {
@@ -55,26 +63,26 @@ impl Asteroid {
 		None
 	}
 
-	pub fn render(&self, phi: &mut Phi) {
+	pub fn render(&self, context: &mut Phi) {
 		if ::DEBUG {
 			// Render the bounding box
-			phi.renderer.set_draw_color(Color::RGB(200, 200, 50));
-			phi.renderer.fill_rect(self.rect.to_sdl().unwrap()).unwrap();
+			context.renderer.set_draw_color(Color::RGB(200, 200, 50));
+			context.renderer.fill_rect(self.rect.to_sdl().unwrap()).unwrap();
 		}
-		self.sprite.render(&mut phi.renderer, self.rect);
+		self.sprite.render(&mut context.renderer, self.rect);
 	}
 }
 
-impl<'a> CollisionBody for Asteroid {
-	fn rect(&self) -> &Rectangle {
+impl<'a> HitBox for Asteroid {
+	fn frame(&self) -> &Rectangle {
 		&self.rect
 	}
 
-	fn frame(&self) -> Rectangle {
+	fn bounds(&self) -> &Rectangle {
 		self.sprite.get_frame_at(self.sprite.current_frame_index()).frame()
 	}
 
-	fn alpha(&self) -> &AlphaChannel {
+	fn collision_mask(&self) -> &AlphaChannel {
 		&self.alpha
 	}
 }
@@ -86,8 +94,9 @@ pub struct AsteroidFactory {
 }
 
 impl AsteroidFactory {
-	pub fn random(&self, phi: &mut Phi) -> Asteroid {
-		let (w, h) = phi.output_size();
+
+	pub fn random(&self, context: &mut Phi) -> Asteroid {
+		let (w, h) = context.output_size();
 
 		// FPS in [10.0, 30.0)
 		let mut sprite = self.sprite.clone();
@@ -107,8 +116,8 @@ impl AsteroidFactory {
 
 			alpha: self.alpha.as_ref().clone(),
 
-			// vel in [50.0, 150.0)
-			vel: super::rand::random::<f64>().abs() * 100.0 + 50.0,
+			// velocity in [50.0, 150.0)
+			velocity: super::rand::random::<f64>().abs() * 100.0 + 50.0,
 		}
 	}
 }

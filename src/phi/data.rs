@@ -41,6 +41,9 @@ impl Rectangle {
 	}
 
 
+	pub fn location(&self) -> (f64, f64) {
+		(self.x, self.y)
+	}
 	/// Centers
 	pub fn center_at(&self, center: (f64, f64)) -> Rectangle {
 		Rectangle {
