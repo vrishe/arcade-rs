@@ -80,13 +80,24 @@ impl GameView {
 	}
 }
 
+macro_rules! explode (
+	( $game_ident: ident : $context_ident: ident @ $center_expr: expr ) => { 
+		{
+			$game_ident.explosions.push(Box::new(
+				$game_ident.explosion_factory.at_center($center_expr)));
+
+			$context_ident.play_sound(&$game_ident.explosion_sound);
+		}
+	}
+);
+
 impl View for GameView {
-	fn update(mut self: Box<Self>, phi: &mut Phi, elapsed: f64) -> ViewAction {
-		if phi.events.now.quit {
+	fn update(mut self: Box<Self>, context: &mut Phi, elapsed: f64) -> ViewAction {
+		if context.events.now.quit {
 			return ViewAction::Quit;
 		}
-		if phi.events.now.key_escape == Some(true) {
-			return ViewAction::Render(Box::new(::views::menu_main::MainMenuView::new(phi)));
+		if context.events.now.key_escape == Some(true) {
+			return ViewAction::Render(Box::new(::views::menu_main::MainMenuView::new(context)));
 		}
 		// This is a tricky 'game' update block, as we have troubles
 		// with the way, how Rust handles runtime safety for references.
@@ -104,8 +115,7 @@ impl View for GameView {
 					match bullet.hits_at(&*asteroid) {
 						Some(hit_location) => {
 							game.blasts.push(Box::new(Blast::new(hit_location)));
-							game.explosions.push(Box::new(
-								game.explosion_factory.at_center(hit_location)));
+							explode!(game:context @ hit_location);
 
 							hits_count += 1;
 						},
@@ -118,25 +128,16 @@ impl View for GameView {
 					// The player's Player is destroyed if it is hit by an asteroid.
 					// In which case, the asteroid is also destroyed.
 					if !game.player.borrow_mut().is_hit_by(&*asteroid) {
-						return Some(asteroid);
+						return asteroid.update(context, elapsed);
 					}
-					game.explosions.push(Box::new(
-						game.explosion_factory.at_center(
-							game.player.borrow().frame().center())));
-
-					hits_count += 1;
-				}
-				while hits_count > 0 {
-					phi.play_sound(&game.explosion_sound);
-
-					hits_count -= 1;
+					explode!(game:context @ game.player.borrow().frame().center());
 				}
 				None
 			})
 			.collect();
 
 			game.blasts = ::std::mem::replace(&mut game.blasts, vec![]).into_iter()
-			.filter_map(|blast| { blast.update(phi, elapsed) })
+			.filter_map(|blast| { blast.update(context, elapsed) })
 			.collect();
 
 			game.asteroids = asteroids_left.into_iter()
@@ -150,10 +151,12 @@ impl View for GameView {
 					if blast.hits_at(tl) || blast.hits_at(br)
 					|| blast.hits_at(tr) || blast.hits_at(bl) {
 
+						explode!(game:context @ asteroid.frame().center());
+
 						return None;
 					}
 				}
-				asteroid.update(phi, elapsed)
+				Some(asteroid)
 			})
 			.collect();
 
@@ -166,14 +169,18 @@ impl View for GameView {
 						return None;
 					}
 				}
-				bullet.update(phi, elapsed)
+				bullet.update(context, elapsed)
 			})
+			.collect();
+
+			game.explosions = ::std::mem::replace(&mut game.explosions, vec![]).into_iter()
+			.filter_map(|explosion| { explosion.update(context, elapsed) })
 			.collect();
 
 			let mut game_player = game.player.borrow_mut();
 
 			if game_player.is_alive() {
-				game_player.update_ref(phi, elapsed);
+				game_player.update_ref(context, elapsed);
 				// Allow the player to shoot after the bullets are updated, so that,
 				// when rendered for the first time, they are drawn wherever they
 				// spawned.
@@ -184,7 +191,7 @@ impl View for GameView {
 				//? The `Vec::append` method moves the content of `spawn_bullets` at
 				//? the end of `game.bullets`. After this is done, the vector returned
 				//? by `spawn_bullets` will be empty.
-				if phi.events.key_space {
+				if context.events.key_space {
 					let mut shots_fired = (game.shot_time / SHOT_DELAY) as isize;
 
 					if shots_fired > 0 {
@@ -193,7 +200,7 @@ impl View for GameView {
 						while shots_fired > 0 {
 							game.bullets.append(&mut game_player.shoot());
 
-							phi.play_sound(&game.bullet_sound);
+							context.play_sound(&game.bullet_sound);
 							shots_fired -= 1;
 						}					
 					} else {
@@ -212,7 +219,7 @@ impl View for GameView {
 			// Randomly create an asteroid about once every 100 frames, that is,
 			// a bit more often than once every two seconds.
 			if self::rand::random::<usize>() % 100 == 0 {
-				game.asteroids.push(Box::new(game.asteroid_factory.random(phi)));
+				game.asteroids.push(Box::new(game.asteroid_factory.random(context)));
 			}
 			game.bg_ambient.update(elapsed);
 			game.bg_back.update(elapsed);
@@ -222,35 +229,39 @@ impl View for GameView {
 		ViewAction::Render(self)
 	}
 
-	fn render(&self, phi: &mut Phi) {
+	fn render(&self, context: &mut Phi) {
 		// Clear the screen
-		phi.renderer.set_draw_color(Color::RGB(0, 0, 0));
-		phi.renderer.clear();
+		context.renderer.set_draw_color(Color::RGB(0, 0, 0));
+		context.renderer.clear();
 
 		// Render Backgrounds
-		self.bg_ambient.render(&mut phi.renderer);
-		self.bg_back.render(&mut phi.renderer);
-		self.bg_middle.render(&mut phi.renderer);
+		self.bg_ambient.render(&mut context.renderer);
+		self.bg_back.render(&mut context.renderer);
+		self.bg_middle.render(&mut context.renderer);
 
 		// Render asteroids
 		for asteroid in &self.asteroids {
-			asteroid.render(phi);
+			asteroid.render(context);
 		}
 		let player = self.player.borrow();
 
 		if player.is_alive() {
-			player.render(phi);
+			player.render(context);
 		}
 		// Render bullets
 		for bullet in &self.bullets {
-			bullet.render(phi);
+			bullet.render(context);
+		}
+		// Render blasts
+		for blast in &self.blasts {
+			blast.render(context);
 		}
 		// Render explosions
 		for explosion in &self.explosions {
-			explosion.render(phi);
+			explosion.render(context);
 		}
 		// Render the foreground
-		self.bg_front.render(&mut phi.renderer);
+		self.bg_front.render(&mut context.renderer);
 	}
 }
 
