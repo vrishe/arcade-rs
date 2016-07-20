@@ -41,6 +41,7 @@ pub struct Player {
 
 	cannon: CannonType,
 	current: PlayerFrame,
+	is_dead: bool,
 }
 
 impl Player {
@@ -79,105 +80,15 @@ impl Player {
 			//? Let `RectBullet` be the default kind of bullet.
 			cannon: CannonType::RectBullet,
 			current: PlayerFrame::MidNorm,
+			is_dead: false,
 		}
 	}
 
 
-	pub fn shoot(&self) -> Vec<Box<Bullet>> {
-		super::bullet::spawn(
-			self.cannon, 
-			self.rect.x + PLAYER_CANNON_TAKEAWAY, 
-			self.rect.y + PLAYER_CANNON1_OFFSET, 
-			self.rect.y + PLAYER_CANNON2_OFFSET)
-	}
+	pub fn update_ref(&mut self, context: &mut Phi, dt: f64) {
+		assert!(self.is_alive());
 
-
-	pub fn update(&mut self, phi: &mut Phi, elapsed: f64) {
 		// Change the player's cannons
-
-		if phi.events.now.key_1 == Some(true) {
-			self.cannon = CannonType::RectBullet;
-		}
-
-		if phi.events.now.key_2 == Some(true) {
-			self.cannon = CannonType::SineBullet {
-				amplitude: 10.0,
-				angular_vel: 15.0,
-			};
-		}
-
-		if phi.events.now.key_3 == Some(true) {
-			self.cannon = CannonType::DivergentBullet {
-				a: 100.0,
-				b: 1.2,
-			};
-		}
-
-		// Move the player's ship
-
-		let diagonal =
-		(phi.events.key_up ^ phi.events.key_down) &&
-		(phi.events.key_left ^ phi.events.key_right);
-
-		let moved =
-		if diagonal { 1.0 / 2.0f64.sqrt() }
-		else { 1.0 } * PLAYER_SPEED * elapsed;
-
-		let dx = match (phi.events.key_left, phi.events.key_right) {
-			(true, true) | (false, false) => 0.0,
-			(true, false) => -moved,
-			(false, true) => moved,
-		};
-
-		let dy = match (phi.events.key_up, phi.events.key_down) {
-			(true, true) | (false, false) => 0.0,
-			(true, false) => -moved,
-			(false, true) => moved,
-		};
-
-		self.rect.x += dx;
-		self.rect.y += dy;
-
-		// The movable region spans the entire height of the window and 70% of its
-		// width. This way, the player cannot get to the far right of the screen, where
-		// we will spawn the asteroids, and get immediately eliminated.
-		//
-		// We restrain the width because most screens are wider than they are high.
-		let movable_region = Rectangle {
-			x: 0.0,
-			y: 0.0,
-			w: phi.output_size().0 as f64 * 0.70,
-			h: phi.output_size().1 as f64,
-		};
-
-		// If the player cannot fit in the screen, then there is a problem and
-		// the game should be promptly aborted.
-		self.rect = self.rect.move_inside(movable_region).unwrap();
-
-		// Select the appropriate sprite of the ship to show.
-		self.current =
-		if dx == 0.0 && dy < 0.0       { PlayerFrame::UpNorm }
-		else if dx > 0.0 && dy < 0.0   { PlayerFrame::UpFast }
-		else if dx < 0.0 && dy < 0.0   { PlayerFrame::UpSlow }
-		else if dx == 0.0 && dy == 0.0 { PlayerFrame::MidNorm }
-		else if dx > 0.0 && dy == 0.0  { PlayerFrame::MidFast }
-		else if dx < 0.0 && dy == 0.0  { PlayerFrame::MidSlow }
-		else if dx == 0.0 && dy > 0.0  { PlayerFrame::DownNorm }
-		else if dx > 0.0 && dy > 0.0   { PlayerFrame::DownFast }
-		else if dx < 0.0 && dy > 0.0   { PlayerFrame::DownSlow }
-		else { unreachable!() };
-	}
-}
-
-impl GameObject<Player> for Player {
-
-	fn location(&self) -> (f64, f64) {
-		self.rect.location()
-	}
-
-	fn update(mut self: Box<Player>, context: &mut Phi, dt: f64) -> Option<Box<Player>> {
-		// Change the player's cannons
-
 		if context.events.now.key_1 == Some(true) {
 			self.cannon = CannonType::RectBullet;
 		}
@@ -193,9 +104,7 @@ impl GameObject<Player> for Player {
 				b: 1.2,
 			};
 		}
-
 		// Move the player's ship
-
 		let diagonal =
 		(context.events.key_up ^ context.events.key_down) &&
 		(context.events.key_left ^ context.events.key_right);
@@ -209,13 +118,11 @@ impl GameObject<Player> for Player {
 			(true, false) => -moved,
 			(false, true) => moved,
 		};
-
 		let dy = match (context.events.key_up, context.events.key_down) {
 			(true, true) | (false, false) => 0.0,
 			(true, false) => -moved,
 			(false, true) => moved,
 		};
-
 		self.rect.x += dx;
 		self.rect.y += dy;
 
@@ -230,7 +137,6 @@ impl GameObject<Player> for Player {
 			w: context.output_size().0 as f64 * 0.70,
 			h: context.output_size().1 as f64,
 		};
-
 		// If the player cannot fit in the screen, then there is a problem and
 		// the game should be promptly aborted.
 		self.rect = self.rect.move_inside(movable_region).unwrap();
@@ -246,12 +152,47 @@ impl GameObject<Player> for Player {
 		else if dx == 0.0 && dy > 0.0  { PlayerFrame::DownNorm }
 		else if dx > 0.0 && dy > 0.0   { PlayerFrame::DownFast }
 		else if dx < 0.0 && dy > 0.0   { PlayerFrame::DownSlow }
-		else { unreachable!() };
-
-		Some(self)
+		else { unreachable!() };	
 	}
 
-	pub fn render(&self, context: &mut Phi) {
+
+	pub fn shoot(&self) -> Vec<Box<Bullet>> {
+		super::bullet::spawn(
+			self.cannon, 
+			self.rect.x + PLAYER_CANNON_TAKEAWAY, 
+			self.rect.y + PLAYER_CANNON1_OFFSET, 
+			self.rect.y + PLAYER_CANNON2_OFFSET)
+	}
+
+	pub fn is_hit_by(&mut self, body: &HitBox) -> bool {
+		self.is_dead |= self.collides_with(body) != None;
+
+		self.is_dead
+	}
+}
+
+impl GameObject<Player> for Player {
+
+	fn is_alive(&self) -> bool {
+		!self.is_dead
+	}
+
+	fn location(&self) -> (f64, f64) {
+		self.rect.location()
+	}
+
+	fn update(mut self: Box<Player>, context: &mut Phi, dt: f64) -> Option<Box<Player>> {
+		if self.is_alive() {
+			self.update_ref(context, dt);
+
+			return Some(self);
+		}
+		None
+	}
+
+	fn render(&self, context: &mut Phi) {
+		assert!(self.is_alive());
+
 		// Render the bounding box (for debugging purposes)
 		if ::DEBUG {
 			context.renderer.set_draw_color(Color::RGB(10, 200, 50));
@@ -263,7 +204,7 @@ impl GameObject<Player> for Player {
 	}
 }
 
-impl<'a> HitBox for Player {
+impl HitBox for Player {
 	fn frame(&self) -> &Rectangle {
 		&self.rect
 	}

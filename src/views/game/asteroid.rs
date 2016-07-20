@@ -49,21 +49,27 @@ impl Asteroid {
 
 impl GameObject<Asteroid> for Asteroid {
 
+	fn is_alive(&self) -> bool {
+		self.rect.x > -ASTEROID_SIDE
+	}
+
 	fn location(&self) -> (f64, f64) {
 		self.rect.location()
 	}
 
-	fn update(mut self: Box<Asteroid>, context: &mut Phi, dt: f64) -> Option<Box<Asteroid>> {
+	fn update(mut self: Box<Asteroid>, _: &mut Phi, dt: f64) -> Option<Box<Asteroid>> {
 		self.rect.x -= dt * self.velocity;
 		self.sprite.add_time(dt);
 
-		if self.rect.x > -ASTEROID_SIDE {
+		if self.is_alive() {
 			return Some(self)
 		}
 		None
 	}
 
-	pub fn render(&self, context: &mut Phi) {
+	fn render(&self, context: &mut Phi) {
+		assert!(self.is_alive());
+
 		if ::DEBUG {
 			// Render the bounding box
 			context.renderer.set_draw_color(Color::RGB(200, 200, 50));
@@ -73,7 +79,7 @@ impl GameObject<Asteroid> for Asteroid {
 	}
 }
 
-impl<'a> HitBox for Asteroid {
+impl HitBox for Asteroid {
 	fn frame(&self) -> &Rectangle {
 		&self.rect
 	}

@@ -1,8 +1,6 @@
-use phi::{Phi, RendererExtensions, View};
+use phi::{Phi, View};
 use phi::data::Rectangle;
 use phi::gfx::{AnimatedSprite, AnimatedSpriteDescr, Renderable};
-
-use sdl2::pixels::Color;
 
 
 use super::GameObject;
@@ -49,21 +47,25 @@ impl Explosion {
 
 impl GameObject<Explosion> for Explosion {
 
+	fn is_alive(&self) -> bool {
+		self.lifetime <= EXPLOSION_DURATION
+	}
+
 	fn location(&self) -> (f64, f64) {
 		self.rect.location()
 	}
 
-	fn update(mut self: Box<Explosion>, context: &mut Phi, dt: f64) -> Option<Box<Explosion>> {
+	fn update(mut self: Box<Explosion>, _: &mut Phi, dt: f64) -> Option<Box<Explosion>> {
 		self.lifetime += dt;
 		self.sprite.add_time(dt);
 
-		if self.lifetime <= EXPLOSION_DURATION {
+		if self.is_alive() {
 			return Some(self);
 		}
 		None
 	}
 
-	pub fn render(&self, context: &mut Phi) {
+	fn render(&self, context: &mut Phi) {
 		self.sprite.render(&mut context.renderer, self.rect);
 	}
 }

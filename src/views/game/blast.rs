@@ -39,6 +39,10 @@ impl Blast {
 
 impl GameObject<Blast> for Blast {
 
+	fn is_alive(&self) -> bool {
+		self.lifetime < BLAST_DURATION
+	}
+
 	fn location(&self) -> (f64, f64) {
 		self.center
 	}
@@ -46,7 +50,7 @@ impl GameObject<Blast> for Blast {
 	fn update(mut self: Box<Blast>, _context: &mut Phi, dt: f64) -> Option<Box<Blast>> {
 		self.lifetime += dt;
 
-		if self.lifetime < BLAST_DURATION {
+		if self.is_alive() {
 			let t = (1000.0 * self.lifetime) / BLAST_DURATION;
 			let value = BLAST_RADIUS_MAX - (BLAST_RADIUS_MAX - BLAST_RADIUS_MIN) * (t * t * t * t * t);
 
@@ -58,6 +62,8 @@ impl GameObject<Blast> for Blast {
 	}
 
 	fn render(&self, context: &mut Phi) {
+		assert!(self.is_alive());
+		
 		context.renderer.set_draw_color(Color::RGB(200, 50, 10));
 		context.renderer.fill_circle(self.center.0, self.center.1, self.blast_radius.sqrt()).unwrap();	
 	}

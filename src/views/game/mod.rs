@@ -9,7 +9,7 @@ mod player;
 
 
 use phi::{Phi, View, ViewAction};
-use phi::data::{MaybeAlive, Rectangle};
+use phi::data::Rectangle;
 use phi::gfx::{AlphaChannel, Renderable, Sprite};
 
 use sdl2::pixels::Color;
@@ -17,7 +17,9 @@ use sdl2::rwops::RWops;
 use sdl2_image::ImageRWops;
 use sdl2_mixer::Chunk;
 
+use std::cell::RefCell;
 use std::path::Path;
+use std::rc::Rc;
 
 use views::background::Background;
 
@@ -33,16 +35,16 @@ const SHOT_DELAY: f64 = 1.0 / 7.62;
 
 
 pub struct GameView {
-	player: Player,
+	player: Rc<RefCell<Box<Player>>>,
 	shot_time: f64,
 
 	asteroid_factory: AsteroidFactory,
 	explosion_factory: ExplosionFactory,
 
-	asteroids: Vec<Asteroid>,
+	asteroids: Vec<Box<Asteroid>>,
 	blasts: Vec<Box<Blast>>,
 	bullets: Vec<Box<Bullet>>,
-	explosions: Vec<Explosion>,
+	explosions: Vec<Box<Explosion>>,
 
 	bg_ambient: Background,
 	bg_back: Background,
@@ -56,7 +58,7 @@ pub struct GameView {
 impl GameView {
 	pub fn new (phi: &mut Phi) -> GameView {
 		GameView {
-			player: Player::new(phi),
+			player: Rc::new(RefCell::new(Box::new(Player::new(phi)))),
 			shot_time: SHOT_DELAY,
 
 			asteroid_factory: Asteroid::factory(phi),
@@ -91,117 +93,126 @@ impl View for GameView {
 		{
 			let game = &mut *self;
 
-			//? We keep track of whether or not the player is alive.
-			let mut player_alive = true;
-
-			//? First, go through the bullets and wrap them in a `MaybeAlive`, so that we
-			//? can keep track of which got into a collision and which did not.
-			let mut transition_bullets = ::std::mem::replace(&mut game.bullets, vec![]).into_iter()
-			.map(|bullet| MaybeAlive { alive: true, value: bullet })
-			.collect::<Vec<_>>();
-
-			game.asteroids = ::std::mem::replace(&mut game.asteroids, vec![]).into_iter()
+			let asteroids_left: Vec<Box<Asteroid>> = ::std::mem::replace(&mut game.asteroids, vec![]).into_iter()
 			.filter_map(|asteroid| {
 				// By default, the asteroid has not been in a collision.
-				let mut asteroid_alive = true;
+				let mut hits_count = 0;
 
-				for bullet in &mut transition_bullets {
+				for bullet in &mut game.bullets {
 					//? Notice that we refer to the bullet as `bullet.value`
 					//? because it has been wrapped in `MaybeAlive`.
-					if asteroid.overlap(&bullet.value.rect()) {
-						asteroid_alive = false;
-						//? We go through every bullet and "kill" those that collide
-						//? with the asteroid. We do this for every asteroid.
-						bullet.alive = false;
+					match bullet.hits_at(&*asteroid) {
+						Some(hit_location) => {
+							game.blasts.push(Box::new(Blast::new(hit_location)));
+							game.explosions.push(Box::new(
+								game.explosion_factory.at_center(hit_location)));
+
+							hits_count += 1;
+						},
+						_ => {}
 					}
-				}
-				// The player's Player is destroyed if it is hit by an asteroid.
-				// In which case, the asteroid is also destroyed.
-				if asteroid.collide(&game.player) {
-					asteroid_alive = false;
-					player_alive = false;
 				}
 				//? Then, we use the magic of `filter_map` to keep only the asteroids
 				//? that didn't explode.
-				if asteroid_alive {
-					return asteroid.update(elapsed);
+				if hits_count == 0 {
+					// The player's Player is destroyed if it is hit by an asteroid.
+					// In which case, the asteroid is also destroyed.
+					if !game.player.borrow_mut().is_hit_by(&*asteroid) {
+						return Some(asteroid);
+					}
+					game.explosions.push(Box::new(
+						game.explosion_factory.at_center(
+							game.player.borrow().frame().center())));
+
+					hits_count += 1;
 				}
-				game.explosions.push(
-					game.explosion_factory.at_center(
-						asteroid.rect().center()));
+				while hits_count > 0 {
+					phi.play_sound(&game.explosion_sound);
 
-				phi.play_sound(&game.explosion_sound);
-
+					hits_count -= 1;
+				}
 				None
 			})
 			.collect();
 
-			// TODO
-			// For the moment, we won't do anything about the player dying. This will be
-			// the subject of a future episode.
-			if !player_alive {
-				println!("The player's Ship has been destroyed.");
-			}
-			game.player.update(phi, elapsed);
-
-			// Update the explosions
-			game.explosions = ::std::mem::replace(&mut game.explosions, vec![]).into_iter()
-			.filter_map(|explosion| explosion.update(elapsed))
+			game.blasts = ::std::mem::replace(&mut game.blasts, vec![]).into_iter()
+			.filter_map(|blast| { blast.update(phi, elapsed) })
 			.collect();
 
-			//? Upon assignment, the old value of `self.bullets`, namely the empty vector,
-			//? will be freed automatically, because its owner no longer refers to it.
-			//? We can then update the bullet quite simply.
-			game.bullets = transition_bullets.into_iter()
-			.filter_map(|transition_bullet| {
-				match transition_bullet.as_option() {
-					Some(bullet) => {
-						let center = bullet.rect().center();
+			game.asteroids = asteroids_left.into_iter()
+			.filter_map(|asteroid| {
+				let tl = asteroid.frame().location();
+				let tr = (tl.0 + asteroid.frame().w, tl.1);
+				let br = (tr.0, tl.1 + asteroid.frame().h);
+				let bl = (tl.0, br.1);
 
-						for explosion in &game.explosions {
-							if explosion.blast(center) {
-								return None;
-							}
-						}
-						bullet.update(phi, elapsed)
+				for blast in &mut game.blasts {
+					if blast.hits_at(tl) || blast.hits_at(br)
+					|| blast.hits_at(tr) || blast.hits_at(bl) {
+
+						return None;
 					}
-					_ => None
 				}
+				asteroid.update(phi, elapsed)
 			})
 			.collect();
 
-			// Allow the player to shoot after the bullets are updated, so that,
-			// when rendered for the first time, they are drawn wherever they
-			// spawned.
-			//
-			//? In this case, we ensure that the new bullets are drawn at the tips
-			//? of the cannons.
-			//?
-			//? The `Vec::append` method moves the content of `spawn_bullets` at
-			//? the end of `game.bullets`. After this is done, the vector returned
-			//? by `spawn_bullets` will be empty.
-			if phi.events.key_space {
-				let mut shots_fired = (game.shot_time / SHOT_DELAY) as isize;
+			game.bullets = ::std::mem::replace(&mut game.bullets, vec![]).into_iter()
+			.filter_map(|bullet| {
+				let center = bullet.center();
 
-				if shots_fired > 0 {
-					game.shot_time = 0.0;
+				for blast in &mut game.blasts {
+					if blast.hits_at(center) {
+						return None;
+					}
+				}
+				bullet.update(phi, elapsed)
+			})
+			.collect();
 
-					while shots_fired > 0 {
-						game.bullets.append(&mut game.player.spawn_bullets());
+			let mut game_player = game.player.borrow_mut();
 
-						phi.play_sound(&game.bullet_sound);
-						shots_fired -= 1;
-					}					
+			if game_player.is_alive() {
+				game_player.update_ref(phi, elapsed);
+				// Allow the player to shoot after the bullets are updated, so that,
+				// when rendered for the first time, they are drawn wherever they
+				// spawned.
+				//
+				//? In this case, we ensure that the new bullets are drawn at the tips
+				//? of the cannons.
+				//?
+				//? The `Vec::append` method moves the content of `spawn_bullets` at
+				//? the end of `game.bullets`. After this is done, the vector returned
+				//? by `spawn_bullets` will be empty.
+				if phi.events.key_space {
+					let mut shots_fired = (game.shot_time / SHOT_DELAY) as isize;
+
+					if shots_fired > 0 {
+						game.shot_time = 0.0;
+
+						while shots_fired > 0 {
+							game.bullets.append(&mut game_player.shoot());
+
+							phi.play_sound(&game.bullet_sound);
+							shots_fired -= 1;
+						}					
+					} else {
+						game.shot_time += elapsed;
+					}				
 				} else {
-					game.shot_time += elapsed;
-				}				
+					game.shot_time = SHOT_DELAY;
+				}						
 			} else {
-				game.shot_time = SHOT_DELAY;
+				// TODO
+				// For the moment, we won't do anything about the player dying. This will be
+				// the subject of a future episode.
+
+				println!("The player's Ship has been destroyed.");
 			}
 			// Randomly create an asteroid about once every 100 frames, that is,
 			// a bit more often than once every two seconds.
 			if self::rand::random::<usize>() % 100 == 0 {
-				game.asteroids.push(game.asteroid_factory.random(phi));
+				game.asteroids.push(Box::new(game.asteroid_factory.random(phi)));
 			}
 			game.bg_ambient.update(elapsed);
 			game.bg_back.update(elapsed);
@@ -225,8 +236,11 @@ impl View for GameView {
 		for asteroid in &self.asteroids {
 			asteroid.render(phi);
 		}
-		self.player.render(phi);
+		let player = self.player.borrow();
 
+		if player.is_alive() {
+			player.render(phi);
+		}
 		// Render bullets
 		for bullet in &self.bullets {
 			bullet.render(phi);
@@ -243,6 +257,8 @@ impl View for GameView {
 
 trait GameObject<T> {
 
+	fn is_alive(&self) -> bool;
+
 	fn location(&self) -> (f64, f64);
 
 
@@ -251,7 +267,7 @@ trait GameObject<T> {
 	fn render(&self, context: &mut Phi);
 }
 
-trait HitBox {
+pub trait HitBox {
 
 	// Global CS
 	fn frame(&self) -> &Rectangle;
@@ -262,16 +278,20 @@ trait HitBox {
 
 	fn collision_mask(&self) -> &AlphaChannel;
 
-	fn collides_with(&self, another: &HitBox) -> bool {
+	fn collides_with(&self, another: &HitBox) -> Option<Rectangle> {
 		Rectangle::intersection(self.frame(), another.frame())
-		.map_or(false, |intersection| {
+		.map_or(None, |intersection| {
 
-			AlphaChannel::intersect(self.collision_mask(), self.frame().x - self.bounds().x, self.frame().y - self.bounds().y, 
-				another.collision_mask(), another.frame().x - another.bounds().x, another.frame().y - another.bounds().y, intersection)
+			if AlphaChannel::intersect(self.collision_mask(), self.frame().x - self.bounds().x, self.frame().y - self.bounds().y, 
+				another.collision_mask(), another.frame().x - another.bounds().x, another.frame().y - another.bounds().y, intersection) {
 
+				return Some(intersection);
+			}
+			None
 		})
 	}
 }
+
 
 
 fn load_spritesheet_with_alpha (phi: &Phi, path: &str, alpha_threshold: f64) -> Result<(AlphaChannel, Sprite), ::std::io::Error> {

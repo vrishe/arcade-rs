@@ -4,6 +4,9 @@ use phi::gfx::AlphaChannel;
 
 use sdl2::pixels::Color;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 
 use super::{GameObject, HitBox};
 
@@ -17,25 +20,39 @@ const BULLET_SPEED: f64 = 240.0;
 pub struct Bullet {
 	location: (f64, f64),
 
-	ballistics: Box<Ballistics>,
+	ballistics: Rc<RefCell<Box<Ballistics>>>,
 	lifetime: f64,
+	is_dead: bool,
 }
 
 impl Bullet {
 
-	pub fn hits(&self, body: &HitBox) -> bool {
-		let hit_rect = self.ballistics.hit_rect(self);
-		
+	pub fn center(&self) -> (f64, f64) {
+		self.ballistics.borrow().hit_rect(self).center()
+	}
+
+	pub fn hits_at(&mut self, body: &HitBox) -> Option<(f64, f64)> {
+		let hit_rect = self.ballistics.borrow().hit_rect(self);
+
 		Rectangle::intersection(&hit_rect, body.frame())
-		.map_or(false, |intersection| {
+		.map_or(None, |intersection| {
 
-			AlphaChannel::intersect_box(body.collision_mask(), body.frame().x - body.bounds().x, body.frame().y - body.bounds().y, intersection)
+			if AlphaChannel::intersect_box(body.collision_mask(), body.frame().x - body.bounds().x, body.frame().y - body.bounds().y, intersection) {
+				self.is_dead |= true;
 
+				return Some(intersection.center());
+			}
+			None
 		})
 	}
 }
 
 impl GameObject<Bullet> for Bullet {
+
+	fn is_alive(&self) -> bool {
+		!self.is_dead
+	}
+
 
 	fn location(&self) -> (f64, f64) {
 		self.location
@@ -43,18 +60,23 @@ impl GameObject<Bullet> for Bullet {
 
 	/// Render the bullet to the screen.
 	fn render(&self, phi: &mut Phi) {
+		assert!(self.is_alive());
 		// We will render this kind of bullet in bullet_color(time).
 		//? This is exactly how we drew our first moving rectangle in the
 		//? seventh part of this series.
 		phi.renderer.set_draw_color(bullet_color(self.lifetime));
-		phi.renderer.fill_rect(self.ballistics.hit_rect(self).to_sdl().unwrap()).unwrap();
+		phi.renderer.fill_rect(self.ballistics.borrow().hit_rect(self).to_sdl().unwrap()).unwrap();
 	}
 
-	fn update(mut self: Box<Bullet>, context: &mut Phi, dt: f64) -> Option<Box<Bullet>> {
+	fn update(mut self: Box<Bullet>, context: &mut Phi, dt: f64) -> Option<Box<Bullet>> {	
 		self.lifetime += dt;
 
-		if self.ballistics.update(&mut self, context, dt) {
-			return Some(self);
+		if self.is_alive() {
+			let ballistics = self.ballistics.clone();
+
+			if ballistics.borrow().update(&mut self, context, dt) {
+				return Some(self);
+			}
 		}
 		None
 	}		
@@ -72,28 +94,28 @@ pub enum CannonType {
 pub fn spawn(cannon: CannonType, cannons_x: f64, cannon1_y: f64, cannon2_y: f64) -> Vec<Box<Bullet>> {
 	let (ballistics_a, ballistics_b) = match cannon {
 		CannonType::RectBullet => {
-			let ballistics = Box::new(RectBulletBallistics {}) as Box<Ballistics>;
+			let result = Rc::new(RefCell::new(Box::new(RectBulletBallistics {}) as Box<Ballistics>));
 
-			(ballistics, ballistics)
+			(result.clone(), result.clone())
 		},
 		CannonType::SineBullet { amplitude, angular_vel } => {
-			let ballistics = Box::new(SineBulletBallistics {
+			let result = Rc::new(RefCell::new(Box::new(SineBulletBallistics {
 				amplitude: amplitude,
 				angular_vel: angular_vel,
-			}) as Box<Ballistics>;
+			}) as Box<Ballistics>));
 
-			(ballistics, ballistics)
+			(result.clone(), result.clone())
 		},
 		CannonType::DivergentBullet { a, b } => {
 			(
-				Box::new(DivergentBulletBallistics {
+				Rc::new(RefCell::new(Box::new(DivergentBulletBallistics {
 					a: -a,
 					b: b 
-				}) as Box<Ballistics>, 
-				Box::new(DivergentBulletBallistics {
+				}) as Box<Ballistics>)), 
+				Rc::new(RefCell::new(Box::new(DivergentBulletBallistics {
 					a: a,
 					b: b 
-				}) as Box<Ballistics>
+				}) as Box<Ballistics>))
 			)
 		},
 	};
@@ -104,12 +126,14 @@ pub fn spawn(cannon: CannonType, cannons_x: f64, cannon1_y: f64, cannon2_y: f64)
 
 		ballistics: ballistics_a,
 		lifetime: 0.0,
+		is_dead: false,
 	}),
 	Box::new(Bullet {
 		location: (cannons_x, cannon2_y - BULLET_HALF_H),
 
 		ballistics: ballistics_b,
 		lifetime: 0.0,
+		is_dead: false,
 	})]
 }
 
