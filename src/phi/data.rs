@@ -1,5 +1,6 @@
 
 use sdl2::rect::Rect as SdlRect;
+use sdl2::rect::Point as SdlPoint;
 
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -109,5 +110,77 @@ impl Rectangle {
 		self.x + self.w > other.x &&
 		self.y < other.y + other.h &&
 		self.y + self.h > other.y
+	}
+}
+
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mat4X4 {
+	pub a00: f64, pub a01: f64, pub a02: f64, pub a03: f64,
+	pub a10: f64, pub a11: f64, pub a12: f64, pub a13: f64,
+	pub a20: f64, pub a21: f64, pub a22: f64, pub a23: f64,
+	pub a30: f64, pub a31: f64, pub a32: f64, pub a33: f64,	
+}
+
+impl Mat4X4 {
+
+	pub fn identity() -> Mat4X4 {
+		Mat4X4 {
+			a00: 1.0, a01: 0.0, a02: 0.0, a03: 0.0,
+			a10: 0.0, a11: 1.0, a12: 0.0, a13: 0.0,
+			a20: 0.0, a21: 0.0, a22: 1.0, a23: 0.0,
+			a30: 0.0, a31: 0.0, a32: 0.0, a33: 1.0,
+		}
+	}
+
+	pub fn projection(fdist: f64) -> Mat4X4 {
+		Mat4X4 {
+			a00: 1.0, a01: 0.0, a02: 0.0, a03: 0.0,
+			a10: 0.0, a11: 1.0, a12: 0.0, a13: 0.0,
+			a20: 0.0, a21: 0.0, a22: -1.0, a23: 0.0,
+			a30: 0.0, a31: 0.0, a32: -1.0 / fdist, a33: 0.0,
+		}
+	}
+}
+
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Point3 {
+	pub x: f64,
+	pub y: f64,
+	pub z: f64,
+}
+
+impl Point3 {
+
+	pub fn new() -> Point3 {
+		Point3 {
+			x: 0.0,
+			y: 0.0,
+			z: 0.0,
+		}
+	}
+
+	pub fn projected(&self, fdist: f64) -> Point3 {
+		return Point3 {
+			x: self.x * fdist / -self.z,
+			y: self.y * fdist / -self.z,
+			z: fdist
+		}
+	}
+
+	pub fn remapped4(&self, mat: &Mat4X4) -> Point3 {
+		let w = mat.a30 + mat.a31 + mat.a32 + mat.a33;
+
+		Point3 {
+			x: (self.x * mat.a00 + self.y * mat.a01 + self.z * mat.a02 + mat.a03) / w,
+			y: (self.x * mat.a10 + self.y * mat.a11 + self.z * mat.a12 + mat.a13) / w,
+			z: (self.x * mat.a20 + self.y * mat.a21 + self.z * mat.a22 + mat.a23) / w,
+		}
+	}
+
+
+	pub fn to_sdl(&self) -> SdlPoint {
+		SdlPoint::new((self.x / self.z) as i32, (self.y / self.z) as i32)
 	}
 }
