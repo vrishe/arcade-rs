@@ -39,6 +39,7 @@ pub struct Player {
 
 	alpha: AlphaChannel,
 
+	ammo: usize,
 	cannon: CannonType,
 	current: PlayerFrame,
 	is_dead: bool,
@@ -78,6 +79,7 @@ impl Player {
 			alpha: alpha,
 
 			//? Let `RectBullet` be the default kind of bullet.
+			ammo: 0,
 			cannon: CannonType::RectBullet,
 			current: PlayerFrame::MidNorm,
 			is_dead: false,
@@ -90,15 +92,18 @@ impl Player {
 
 		// Change the player's cannons
 		if context.events.now.key_1 == Some(true) {
+			self.ammo = 0;
 			self.cannon = CannonType::RectBullet;
 		}
 		if context.events.now.key_2 == Some(true) {
+			self.ammo = 1;
 			self.cannon = CannonType::SineBullet {
 				amplitude: 10.0,
 				angular_vel: 15.0,
 			};
 		}
 		if context.events.now.key_3 == Some(true) {
+			self.ammo = 2;
 			self.cannon = CannonType::DivergentBullet {
 				a: 100.0,
 				b: 1.2,
@@ -155,6 +160,10 @@ impl Player {
 		else { unreachable!() };	
 	}
 
+
+	pub fn get_ammo(&self) -> usize {
+		self.ammo
+	}
 
 	pub fn shoot(&self) -> Vec<Box<Bullet>> {
 		super::bullet::spawn(

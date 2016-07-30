@@ -5,7 +5,10 @@ extern crate sdl2_image;
 extern crate sdl2_mixer;
 extern crate sdl2_ttf;
 
+#[macro_use]
+mod macros;
 
+mod hud;
 mod phi;
 mod views;
 
@@ -13,7 +16,6 @@ mod views;
 const DEBUG: bool = true;
 #[cfg(not(feature="debug"))]
 const DEBUG: bool= false;
-
 
 fn main() {
 	::phi::spawn("ArcadeRS", (800, 600), |phi| {

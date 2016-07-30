@@ -21,7 +21,8 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use views::background::Background;
+use hud::background::Background;
+use hud::button::Button;
 
 
 use self::asteroid::{Asteroid, AsteroidFactory};
@@ -51,6 +52,8 @@ pub struct GameView {
 	bg_middle: Background,
 	bg_front: Background,
 
+	buttons_ammo: Vec<Button>,
+
 	bullet_sound: Chunk,
 	explosion_sound: Chunk,
 }
@@ -73,6 +76,8 @@ impl GameView {
 			bg_back: Background::load(&phi.renderer, "assets/backgrounds/starBG.png", 20.0).unwrap(),
 			bg_middle: Background::load(&phi.renderer, "assets/backgrounds/starMG.png", 40.0).unwrap(),
 			bg_front: Background::load(&phi.renderer, "assets/backgrounds/starFG.png", 80.0).unwrap(),
+
+			buttons_ammo: vec![Button::load(&phi.renderer, "assets/sprites/button_square.png", (32.0, 32.0)).unwrap(); 3],
 
 			bullet_sound: Chunk::from_file(Path::new("assets/sounds/bullet.ogg")).unwrap(),
 			explosion_sound: Chunk::from_file(Path::new("assets/sounds/explosion.ogg")).unwrap()
@@ -122,15 +127,16 @@ impl View for GameView {
 						_ => {}
 					}
 				}
+				let mut player = game.player.borrow_mut();
 				//? Then, we use the magic of `filter_map` to keep only the asteroids
 				//? that didn't explode.
 				if hits_count == 0 {
 					// The player's Player is destroyed if it is hit by an asteroid.
 					// In which case, the asteroid is also destroyed.
-					if !game.player.borrow_mut().is_hit_by(&*asteroid) {
+					if !player.is_alive() || !player.is_hit_by(&*asteroid) {
 						return asteroid.update(context, elapsed);
 					}
-					explode!(game:context @ game.player.borrow().frame().center());
+					explode!(game:context @ player.frame().center());
 				}
 				None
 			})
@@ -177,10 +183,10 @@ impl View for GameView {
 			.filter_map(|explosion| { explosion.update(context, elapsed) })
 			.collect();
 
-			let mut game_player = game.player.borrow_mut();
+			let mut player = game.player.borrow_mut();
 
-			if game_player.is_alive() {
-				game_player.update_ref(context, elapsed);
+			if player.is_alive() {
+				player.update_ref(context, elapsed);
 				// Allow the player to shoot after the bullets are updated, so that,
 				// when rendered for the first time, they are drawn wherever they
 				// spawned.
@@ -198,7 +204,7 @@ impl View for GameView {
 						game.shot_time = 0.0;
 
 						while shots_fired > 0 {
-							game.bullets.append(&mut game_player.shoot());
+							game.bullets.append(&mut player.shoot());
 
 							context.play_sound(&game.bullet_sound);
 							shots_fired -= 1;
@@ -208,6 +214,18 @@ impl View for GameView {
 					}				
 				} else {
 					game.shot_time = SHOT_DELAY;
+				}
+				let output_size = context.output_size();
+
+				for i in 0..game.buttons_ammo.len() {
+					let button = &mut game.buttons_ammo[i];
+					let button_frame = *button.frame();
+
+					let is_selected = player.get_ammo() == i;
+					let vertical_offset = if is_selected { 10.5 } else { 8.0 };
+
+					button.set_location(8.0 + i as f64 * button_frame.w, output_size.1 - vertical_offset - button_frame.h);
+					button.set_state(is_selected as usize);
 				}						
 			} else {
 				// TODO
@@ -262,6 +280,13 @@ impl View for GameView {
 		}
 		// Render the foreground
 		self.bg_front.render(&mut context.renderer);
+
+		// Render HUD
+		if self.player.borrow().is_alive() {
+			for button in &self.buttons_ammo {
+				button.render(&mut context.renderer);
+			}			
+		}
 	}
 }
 
