@@ -52,7 +52,7 @@ pub struct GameView {
 	bg_middle: Background,
 	bg_front: Background,
 
-	buttons_ammo: Vec<Button>,
+	buttons_ammo: Vec<GameButton>,
 
 	bullet_sound: Chunk,
 	explosion_sound: Chunk,
@@ -60,6 +60,12 @@ pub struct GameView {
 
 impl GameView {
 	pub fn new (phi: &mut Phi) -> GameView {
+		let mut buttons_ammo = Vec::with_capacity(3);
+
+		buttons_ammo.push(GameButton::new(phi, "assets/sprites/button_square.png", "1", (32.0, 32.0), (1.5, 1.5, 3.5, 1.5)));
+		buttons_ammo.push(GameButton::new(phi, "assets/sprites/button_square.png", "2", (32.0, 32.0), (1.5, 1.5, 3.5, 1.5)));
+		buttons_ammo.push(GameButton::new(phi, "assets/sprites/button_square.png", "3", (32.0, 32.0), (1.5, 1.5, 3.5, 1.5)));
+
 		GameView {
 			player: Rc::new(RefCell::new(Box::new(Player::new(phi)))),
 			shot_time: SHOT_DELAY,
@@ -77,7 +83,7 @@ impl GameView {
 			bg_middle: Background::load(&phi.renderer, "assets/backgrounds/starMG.png", 40.0).unwrap(),
 			bg_front: Background::load(&phi.renderer, "assets/backgrounds/starFG.png", 80.0).unwrap(),
 
-			buttons_ammo: vec![Button::load(&phi.renderer, "assets/sprites/button_square.png", (32.0, 32.0)).unwrap(); 3],
+			buttons_ammo: buttons_ammo,
 
 			bullet_sound: Chunk::from_file(Path::new("assets/sounds/bullet.ogg")).unwrap(),
 			explosion_sound: Chunk::from_file(Path::new("assets/sounds/explosion.ogg")).unwrap()
@@ -284,9 +290,60 @@ impl View for GameView {
 		// Render HUD
 		if self.player.borrow().is_alive() {
 			for button in &self.buttons_ammo {
-				button.render(&mut context.renderer);
+				button.render(context);
 			}			
 		}
+	}
+}
+
+
+struct GameButton {
+	button: Button,
+	label: Sprite,
+	label_frame: Rectangle,
+}
+
+impl GameButton {
+
+	pub fn new (context: &mut Phi, path: &str, label: &str, size: (f64, f64), padding: (f64, f64, f64, f64)) -> GameButton {
+		let label_sprite = context.ttf_str_sprite(label, "assets/fonts/BlackOpsOne-Regular.ttf", (size.1 / 3.36) as u16, Color::RGB(0, 0, 44)).unwrap();
+		let scale = ((size.0 - padding.0 - padding.2) / label_sprite.size().0).min((size.1 - padding.1 - padding.3) / label_sprite.size().1).min(1.0);
+		let label_size = (label_sprite.size().0 * scale, label_sprite.size().1 * scale);
+
+		GameButton {
+			button: Button::load(&context.renderer, path, size).unwrap(),
+			label: label_sprite,
+			label_frame: Rectangle {
+				x: size.0 - label_size.0 - padding.2,
+				y: size.1 - label_size.1 - padding.3,
+				w: label_size.0,
+				h: label_size.1
+			}
+		}
+	}
+
+
+	pub fn set_location(&mut self, x: f64, y:f64) {
+		self.button.set_location(x, y);
+	}
+
+	pub fn set_state(&mut self, state: usize) {
+		self.button.set_state(state);
+	}
+
+
+	pub fn frame(&self) -> &Rectangle {
+		self.button.frame()
+	}
+
+
+	pub fn render(&self, context: &mut Phi) {
+		self.button.render(&mut context.renderer);
+		self.label.render(&mut context.renderer, Rectangle {
+			x: self.button.frame().x + self.label_frame.x,
+			y: self.button.frame().y + self.label_frame.y,
+			..self.label_frame
+		});
 	}
 }
 
@@ -327,7 +384,6 @@ pub trait HitBox {
 		})
 	}
 }
-
 
 
 fn load_spritesheet_with_alpha (phi: &Phi, path: &str, alpha_threshold: f64) -> Result<(AlphaChannel, Sprite), ::std::io::Error> {
