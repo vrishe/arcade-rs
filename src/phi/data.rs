@@ -76,7 +76,7 @@ impl Rectangle {
 	/// Return a (perhaps moved) rectangle which is contained by a `parent`
 	/// rectangle. If it can indeed be moved to fit, return `Some(result)`;
 	/// otherwise, return `None`.
-	pub fn move_inside(&self, parent: Rectangle) -> Option<Rectangle> {
+	pub fn move_inside(&self, parent: &Rectangle) -> Option<Rectangle> {
 		// It must be smaller than the parent rectangle to fit in it.
 		if self.w <= parent.w && self.h <= parent.h {
 			return 		Some(Rectangle {
@@ -93,7 +93,7 @@ impl Rectangle {
 		None
 	}
 
-	pub fn contains(&self, rect: Rectangle) -> bool {
+	pub fn contains(&self, rect: &Rectangle) -> bool {
 		let xmin = rect.x;
 		let xmax = xmin + rect.w;
 		let ymin = rect.y;
@@ -105,7 +105,7 @@ impl Rectangle {
 		ymax >= self.y && ymax <= self.y + self.h
 	}
 
-	pub fn overlaps(&self, other: Rectangle) -> bool {
+	pub fn overlaps(&self, other: &Rectangle) -> bool {
 		self.x < other.x + other.w &&
 		self.x + self.w > other.x &&
 		self.y < other.y + other.h &&

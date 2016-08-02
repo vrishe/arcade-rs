@@ -62,9 +62,9 @@ impl GameView {
 	pub fn new (phi: &mut Phi) -> GameView {
 		let mut buttons_ammo = Vec::with_capacity(3);
 
-		buttons_ammo.push(GameButton::new(phi, "assets/sprites/button_square.png", "1", (32.0, 32.0), (1.5, 1.5, 3.5, 1.5)));
-		buttons_ammo.push(GameButton::new(phi, "assets/sprites/button_square.png", "2", (32.0, 32.0), (1.5, 1.5, 3.5, 1.5)));
-		buttons_ammo.push(GameButton::new(phi, "assets/sprites/button_square.png", "3", (32.0, 32.0), (1.5, 1.5, 3.5, 1.5)));
+		buttons_ammo.push(GameButton::new(phi, "assets/sprites/button_ammo0.png", "1", (32.0, 32.0), (1.5, 1.5, 3.5, 1.5)));
+		buttons_ammo.push(GameButton::new(phi, "assets/sprites/button_ammo1.png", "2", (32.0, 32.0), (1.5, 1.5, 3.5, 1.5)));
+		buttons_ammo.push(GameButton::new(phi, "assets/sprites/button_ammo2.png", "3", (32.0, 32.0), (1.5, 1.5, 3.5, 1.5)));
 
 		GameView {
 			player: Rc::new(RefCell::new(Box::new(Player::new(phi)))),
@@ -223,6 +223,8 @@ impl View for GameView {
 				}
 				let output_size = context.output_size();
 
+				let mut opaque = true;
+				let mut changed = false;
 				for i in 0..game.buttons_ammo.len() {
 					let button = &mut game.buttons_ammo[i];
 					let button_frame = *button.frame();
@@ -230,8 +232,19 @@ impl View for GameView {
 					let is_selected = player.get_ammo() == i;
 					let vertical_offset = if is_selected { 10.5 } else { 8.0 };
 
-					button.set_location(8.0 + i as f64 * button_frame.w, output_size.1 - vertical_offset - button_frame.h);
-					button.set_state(is_selected as usize);
+					button.set_location(8.0 + i as f64 * (button_frame.w + 2.0), output_size.1 - vertical_offset - button_frame.h);
+					changed |= button.set_state(is_selected as usize);
+
+					if opaque && button.frame().overlaps(player.frame()) {
+						opaque = false;
+					}
+				}
+				let alpha_delta = if opaque { 4.0 * elapsed } else { -4.0 * elapsed };
+
+				for button in &mut game.buttons_ammo {
+					let alpha = if !changed { button.get_alpha() } else { 1.0 };
+
+					button.set_alpha(alpha + alpha_delta);
 				}						
 			} else {
 				// TODO
@@ -306,7 +319,7 @@ struct GameButton {
 impl GameButton {
 
 	pub fn new (context: &mut Phi, path: &str, label: &str, size: (f64, f64), padding: (f64, f64, f64, f64)) -> GameButton {
-		let label_sprite = context.ttf_str_sprite(label, "assets/fonts/BlackOpsOne-Regular.ttf", (size.1 / 3.36) as u16, Color::RGB(0, 0, 44)).unwrap();
+		let label_sprite = context.ttf_str_sprite(label, "assets/fonts/BlackOpsOne-Regular.ttf", (size.1 / 3.36) as u16, Color::RGB(255, 255, 255)).unwrap();
 		let scale = ((size.0 - padding.0 - padding.2) / label_sprite.size().0).min((size.1 - padding.1 - padding.3) / label_sprite.size().1).min(1.0);
 		let label_size = (label_sprite.size().0 * scale, label_sprite.size().1 * scale);
 
@@ -327,8 +340,22 @@ impl GameButton {
 		self.button.set_location(x, y);
 	}
 
-	pub fn set_state(&mut self, state: usize) {
-		self.button.set_state(state);
+	pub fn get_alpha(&self) -> f64 {
+		self.label.get_alpha()
+	}
+
+	pub fn set_alpha(&mut self, alpha: f64) {
+		self.button.set_alpha(alpha);
+		self.label.set_alpha(alpha);
+	}
+
+	pub fn set_state(&mut self, state: usize) -> bool {
+		if self.button.get_state() != state {
+			self.button.set_state(state);
+
+			return true;
+		}
+		false
 	}
 
 

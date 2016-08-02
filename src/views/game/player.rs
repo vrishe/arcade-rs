@@ -144,7 +144,7 @@ impl Player {
 		};
 		// If the player cannot fit in the screen, then there is a problem and
 		// the game should be promptly aborted.
-		self.rect = self.rect.move_inside(movable_region).unwrap();
+		self.rect = self.rect.move_inside(&movable_region).unwrap();
 
 		// Select the appropriate sprite of the ship to show.
 		self.current =

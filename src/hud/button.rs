@@ -3,15 +3,13 @@ use phi::gfx::{Renderable, Sprite};
 
 use sdl2::render::Renderer;
 
-use std::rc::Rc;
-
 
 #[derive(Clone)]
 pub struct Button {
 	frame: Rectangle,
 
 	state: usize,
-	sprites: Rc<Vec<Sprite>>,
+	sprites: Vec<Sprite>,
 }
 
 impl Button {
@@ -44,12 +42,26 @@ impl Button {
 					h: size.1,					
 				},
 				state: 0,
-				sprites: Rc::new(sprites),
+				sprites: sprites,
 			})
 		}
 		None
 	}
 
+
+	pub fn get_alpha(&self) -> f64 {
+		self.sprites[self.state].get_alpha()
+	}
+
+	pub fn set_alpha(&mut self, alpha: f64) {
+		for sprite in &mut self.sprites {
+			sprite.set_alpha(alpha);
+		}
+	}
+
+	pub fn get_state(&self) -> usize {
+		self.state
+	}
 
 	pub fn set_state(&mut self, state: usize) {
 		if state >= self.sprites.len() {

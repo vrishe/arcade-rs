@@ -355,6 +355,15 @@ impl Sprite {
 		renderer.load_texture(Path::new(path)).ok().map(Sprite::new)
 	}
 
+
+	pub fn get_alpha(&self) -> f64 {
+		self.tex.borrow().alpha_mod() as f64 / 255.0
+	}
+
+	pub fn set_alpha(&mut self, alpha: f64) {
+		self.tex.borrow_mut().set_alpha_mod((alpha.max(0.0).min(1.0) * 255.0).round() as u8);
+	}
+
 	/// Returns a new `Sprite` representing a sub-region of the current one.
 	/// The provided `rect` is relative to the currently held region.
 	/// Returns `Some` if the `rect` is valid, i.e. included in the current
@@ -367,7 +376,7 @@ impl Sprite {
 		};
 
 		// Verify that the requested region is inside of the current one
-		if self.src.contains(new_src) {
+		if self.src.contains(&new_src) {
 			return Some(Sprite {
 				tex: self.tex.clone(),
 				src: new_src,
@@ -396,7 +405,7 @@ impl Renderable for Sprite {
 #[derive(Clone)]
 pub struct AnimatedSprite {
 	/// The frames that will be rendered, in order.
-	sprites: Rc<Vec<Sprite>>,
+	sprites: Vec<Sprite>,
 
 	/// The time it takes to get from one frame to the next, in seconds.
 	frame_delay: f64,
@@ -420,7 +429,7 @@ impl AnimatedSprite {
 	/// Creates a new animated sprite initialized at time 0.
 	pub fn new(sprites: Vec<Sprite>, fps: f64) -> AnimatedSprite {
 		AnimatedSprite {
-			sprites: Rc::new(sprites),
+			sprites: sprites,
 			frame_delay: 1f64 / fps,
 			current_time: 0.0,
 			current_frame: 0,
