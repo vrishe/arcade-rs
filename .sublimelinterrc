@@ -1,0 +1,9 @@
+{
+  "lint_mode": "save",
+  "linters": {
+    "rust": {
+      "use-cargo": "true",
+      "use-cargo-check": "true"
+    }
+  }
+}
