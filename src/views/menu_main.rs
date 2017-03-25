@@ -7,7 +7,7 @@ use phi::gfx::{Renderable, Sprite};
 
 use sdl2::pixels::Color;
 use sdl2::rect::Point as SdlPoint;
-use sdl2_mixer::Music;
+use sdl2::mixer::Music;
 
 
 const COUNT_STARS_MAX: usize = 2048;
@@ -28,7 +28,7 @@ pub struct MainMenuView {
 	stars: Vec<Point3>,
 	stars_frame_buffer: [SdlPoint; COUNT_STARS_MAX],
 
-	music: Music,
+	music: Music<'static>,
 }
 
 impl MainMenuView {

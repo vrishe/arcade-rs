@@ -8,9 +8,9 @@ pub mod gfx;
 
 use sdl2::pixels::Color;
 use sdl2::render::Renderer;
-use sdl2_ttf::{Sdl2TtfContext, Font};
+use sdl2::ttf::{Sdl2TtfContext/*, Font*/};
 
-use std::collections::HashMap;
+// use std::collections::HashMap;
 use std::path::Path;
 
 
@@ -54,9 +54,9 @@ pub struct Phi<'window> {
 	pub renderer: Renderer<'window>,
 
 	ttf_context: Sdl2TtfContext,
-	cached_fonts: HashMap<(&'static str, u16), Font>,
+	// cached_fonts: HashMap<(&'static str, u16), Font<'window, 'static>>,
 
-	allocated_channels: isize,
+	allocated_channels: i32,
 }
 
 impl <'window> Phi<'window> {
@@ -66,7 +66,7 @@ impl <'window> Phi<'window> {
 			renderer: renderer,
 
 			ttf_context: ttf_context,
-			cached_fonts: HashMap::new(),
+			// cached_fonts: HashMap::new(),
 
 			allocated_channels: 32
 		};
@@ -74,7 +74,7 @@ impl <'window> Phi<'window> {
 		//? That is, how many sounds do we wish to be able to play at the same time?
 		//? While testing, 16 channels seemed to be sufficient. Which means that we
 		//? should probably request 32 of 'em just in case. :-°
-		::sdl2_mixer::allocate_channels(result.allocated_channels);
+		::sdl2::mixer::allocate_channels(result.allocated_channels);
 
 		result
 	}
@@ -85,34 +85,39 @@ impl <'window> Phi<'window> {
 	}
 
 	pub fn ttf_str_sprite(&mut self, text: &str, font_path: &'static str, size: u16, color: Color) -> Option<Sprite> {
-		//? First, we verify whether the font is already cached. If this is the
-		//? case, we use it to render the text.
-		if let Some(font) = self.cached_fonts.get(&(font_path, size)) {
-			return font.render(text).blended(color).ok()
+		// //? First, we verify whether the font is already cached. If this is the
+		// //? case, we use it to render the text.
+		// if let Some(font) = self.cached_fonts.get(&(font_path, size)) {
+		// 	return font.render(text).blended(color).ok()
+		// 		.and_then(|surface| self.renderer.create_texture_from_surface(&surface).ok())
+		// 		.map(Sprite::from_texture)
+		// }
+		// //? Otherwise, we start by trying to load the requested font.
+		// self.ttf_context.load_font(Path::new(font_path), size).ok()
+		// 	.and_then(|font| {
+		// 		//? If this works, we cache the font we acquired.
+		// 		self.cached_fonts.insert((font_path, size), font);
+		// 		//? Then, we call the method recursively. Because we know that
+		// 		//? the font has been cached, the `if` block will be executed
+		// 		//? and the sprite will be appropriately rendered.
+		// 		self.ttf_str_sprite(text, font_path, size, color)
+		// 	})
+
+		self.ttf_context.load_font(Path::new(font_path), size).ok()
+			.and_then(|font| font.render(text).blended(color).ok())
 			.and_then(|surface| self.renderer.create_texture_from_surface(&surface).ok())
 			.map(Sprite::from_texture)
-		}
-		//? Otherwise, we start by trying to load the requested font.
-		self.ttf_context.load_font(Path::new(font_path), size).ok()
-		.and_then(|font| {
-			//? If this works, we cache the font we acquired.
-			self.cached_fonts.insert((font_path, size), font);
-			//? Then, we call the method recursively. Because we know that
-			//? the font has been cached, the `if` block will be executed
-			//? and the sprite will be appropriately rendered.
-			self.ttf_str_sprite(text, font_path, size, color)
-		})
 	}
 
 	/// Play a sound once, and allocate new channels if this is necessary.
-	pub fn play_sound(&mut self, sound: &::sdl2_mixer::Chunk) {
+	pub fn play_sound(&mut self, sound: &::sdl2::mixer::Chunk) {
 		// Attempt to play the sound once.
-		match ::sdl2_mixer::Channel::all().play(sound, 0) {
+		match ::sdl2::mixer::Channel::all().play(sound, 0) {
 			Err(_) => {
 				// If there weren't enough channels allocated, then we double
 				// that number and try again.
 				self.allocated_channels *= 2;
-				::sdl2_mixer::allocate_channels(self.allocated_channels);
+				::sdl2::mixer::allocate_channels(self.allocated_channels);
 
 				self.play_sound(sound);
 			},
@@ -178,13 +183,13 @@ pub fn spawn<F>(title: &str, size: (u32, u32), init: F) where F: Fn(&mut Phi) ->
 	let sdl_context = ::sdl2::init().unwrap();
 	let video = sdl_context.video().unwrap();
 	let mut timer = sdl_context.timer().unwrap();
-	let _image_context = ::sdl2_image::init(::sdl2_image::INIT_PNG).unwrap();
-	let _ttf_context = ::sdl2_ttf::init().unwrap();
+	let _image_context = ::sdl2::image::init(::sdl2::image::INIT_PNG).unwrap();
+	let _ttf_context = ::sdl2::ttf::init().unwrap();
 
 	// Initialize audio plugin
 	//? We will stick to the Ogg format throughout this article. However, you
 	//? can easily require other ones.
-	let _mixer_context = ::sdl2_mixer::init(::sdl2_mixer::INIT_OGG).unwrap();
+	let _mixer_context = ::sdl2::mixer::init(::sdl2::mixer::INIT_OGG).unwrap();
 	//? We configure our audio context so that:
 	//?   * The frequency is 44100;
 	//?   * Use signed 16 bits samples, in little-endian byte order;
@@ -192,7 +197,7 @@ pub fn spawn<F>(title: &str, size: (u32, u32), init: F) where F: Fn(&mut Phi) ->
 	//?   * Samples are 1024 bytes in size.
 	//? You don't really need to understand what all of this means. I myself just
 	//? copy-pasted this from andelf's demo. ;-)
-	::sdl2_mixer::open_audio(44100, ::sdl2_mixer::AUDIO_S16LSB, 2, 1024).unwrap();
+	::sdl2::mixer::open_audio(44100, ::sdl2::mixer::AUDIO_S16LSB, 2, 1024).unwrap();
 
 	// Create the window
 	let window = video.window(title, size.0, size.1)

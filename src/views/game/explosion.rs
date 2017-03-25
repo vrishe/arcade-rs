@@ -1,4 +1,4 @@
-use phi::{Phi, View};
+use phi::Phi;
 use phi::data::Rectangle;
 use phi::gfx::{AnimatedSprite, AnimatedSpriteDescr, Renderable};
 

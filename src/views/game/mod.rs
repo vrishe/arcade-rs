@@ -14,8 +14,8 @@ use phi::gfx::{AlphaChannel, Renderable, Sprite};
 
 use sdl2::pixels::Color;
 use sdl2::rwops::RWops;
-use sdl2_image::ImageRWops;
-use sdl2_mixer::Chunk;
+use sdl2::image::ImageRWops;
+use sdl2::mixer::Chunk;
 
 use std::cell::RefCell;
 use std::path::Path;
@@ -382,7 +382,7 @@ trait GameObject<T> {
 	fn location(&self) -> (f64, f64);
 
 
-	fn update(mut self: Box<Self>, context: &mut Phi, dt: f64) -> Option<Box<T>>;
+	fn update(self: Box<Self>, context: &mut Phi, dt: f64) -> Option<Box<T>>;
 
 	fn render(&self, context: &mut Phi);
 }

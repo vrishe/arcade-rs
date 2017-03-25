@@ -1,9 +1,6 @@
 #![allow(dead_code)]
 
 extern crate sdl2;
-extern crate sdl2_image;
-extern crate sdl2_mixer;
-extern crate sdl2_ttf;
 
 #[macro_use]
 mod macros;
